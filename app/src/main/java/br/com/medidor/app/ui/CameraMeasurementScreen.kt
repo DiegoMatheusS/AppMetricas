@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -500,7 +502,11 @@ internal fun CameraPreviewAndCapture(onPhoto: (Bitmap) -> Unit, onError: (String
         }
     }
 
-    AndroidView(factory = { view }, modifier = Modifier.fillMaxWidth().height(340.dp))
+    Row(modifier = Modifier.fillMaxWidth().height((LocalConfiguration.current.screenHeightDp - 100).coerceAtLeast(190).dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    AndroidView(factory = { view }, modifier = Modifier.weight(1f).fillMaxSize())
+    Column(modifier = Modifier.width(154.dp), verticalArrangement = Arrangement.Center) {
+    Text("Câmera", style = MaterialTheme.typography.titleSmall)
     Button(enabled = imageCapture != null, onClick = {
         val camera = imageCapture ?: return@Button
         val file = File(context.cacheDir, "medicao_${System.currentTimeMillis()}.jpg")
@@ -523,7 +529,10 @@ internal fun CameraPreviewAndCapture(onPhoto: (Bitmap) -> Unit, onError: (String
                 }
             }
         )
-    }) { Text("Capturar fotografia") }
+    }, modifier = Modifier.fillMaxWidth()) { Text("Capturar") }
+    Text("Toque em Capturar e calibre a foto para obter medidas.", style = MaterialTheme.typography.bodySmall)
+    }
+    }
 }
 
 private data class ImageRect(val left: Float, val top: Float, val width: Float, val height: Float)
