@@ -21,6 +21,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +73,7 @@ private data class ContourOverlay(
  * calibrated measurements. Tap an object to resample a color region every
  * ~250ms. This is NOT an ML object tracker or a depth sensor.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LiveContourCamera(
     onPhoto: (Bitmap) -> Unit,
@@ -79,10 +85,11 @@ internal fun LiveContourCamera(
     val latestError by rememberUpdatedState(onError)
     val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
     val worker = remember { Executors.newSingleThreadExecutor() }
-    val selected = remember { AtomicReference<NormalizedPoint?>(null) }
+    val selected = remember { AtomicReference<NormalizedPoint?>(NormalizedPoint(0.5f, 0.5f)) }
     val previous = remember { AtomicReference<PlanarContourResult?>(null) }
     val chosenArea = remember { AtomicReference<ContourNormalizedArea?>(null) }
     var areaMode by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     var firstCorner by remember { mutableStateOf<NormalizedPoint?>(null) }
     var drawnArea by remember { mutableStateOf<ContourNormalizedArea?>(null) }
     val selectionGeneration = remember { AtomicInteger(0) }
@@ -224,57 +231,8 @@ internal fun LiveContourCamera(
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Contorno ao vivo — experimental",
-            style = MaterialTheme.typography.titleMedium)
-        Text("Selecione diretamente o objeto ou delimite uma área para reduzir " +
-            "a interferência de fundos com cores parecidas.",
-            style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = !areaMode,
-                onClick = {
-                    areaMode = false
-                    chosenArea.set(null)
-                    drawnArea = null
-                    firstCorner = null
-                    selected.set(null)
-                    previous.set(null)
-                    selectionGeneration.incrementAndGet()
-                    overlay = overlay?.copy(contour=null,assessment=null,
-                        message="Modo livre: toque no objeto.")
-                },
-                label = { Text("Toque livre") }
-            )
-            FilterChip(
-                selected = areaMode,
-                onClick = {
-                    areaMode = true
-                    chosenArea.set(null)
-                    drawnArea = null
-                    firstCorner = null
-                    selected.set(null)
-                    previous.set(null)
-                    selectionGeneration.incrementAndGet()
-                    overlay = overlay?.copy(contour=null,assessment=null,
-                        message="Marque dois cantos e depois toque dentro do objeto.")
-                },
-                label = { Text("Delimitar área") }
-            )
-        }
-        if (areaMode) {
-            OutlinedButton(onClick = {
-                chosenArea.set(null)
-                drawnArea = null
-                firstCorner = null
-                selected.set(null)
-                previous.set(null)
-                selectionGeneration.incrementAndGet()
-                overlay = overlay?.copy(contour=null,assessment=null,
-                    message="Marque novamente dois cantos e toque dentro do objeto.")
-            }) { Text("Redefinir área") }
-        }
-        Box(Modifier.fillMaxWidth().height(340.dp)) {
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
             Canvas(Modifier.fillMaxSize().pointerInput(areaMode,overlay?.width,overlay?.height) {
                 detectTapGestures { touch ->
@@ -354,6 +312,80 @@ internal fun LiveContourCamera(
                 }
             }
         }
+        TextButton(
+            onClick = { menuOpen = true },
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+        ) {
+            Text("⌃  Puxe para abrir controles", color = Color.White)
+        }
+        Column(Modifier.align(Alignment.BottomCenter).padding(12.dp)) {
+            Text(
+                overlay?.contour?.let {
+                    "Contorno detectado: largura ${(it.widthFraction*100).toInt()}% • altura ${(it.heightFraction*100).toInt()}% do quadro"
+                } ?: (overlay?.message ?: "Procurando contornos… Toque no objeto para corrigir."),
+                color = Color.White, style = MaterialTheme.typography.bodyMedium
+            )
+            Text("Valores relativos à imagem; centímetros exigem calibração.",
+                color = Color.White, style = MaterialTheme.typography.bodySmall)
+        }
+        if (menuOpen) {
+            ModalBottomSheet(onDismissRequest = { menuOpen = false }) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+
+        Text("Contorno ao vivo — experimental",
+            style = MaterialTheme.typography.titleMedium)
+        Text("Selecione diretamente o objeto ou delimite uma área para reduzir " +
+            "a interferência de fundos com cores parecidas.",
+            style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !areaMode,
+                onClick = {
+                    areaMode = false
+                    chosenArea.set(null)
+                    drawnArea = null
+                    firstCorner = null
+                    selected.set(null)
+                    previous.set(null)
+                    selectionGeneration.incrementAndGet()
+                    overlay = overlay?.copy(contour=null,assessment=null,
+                        message="Modo livre: toque no objeto.")
+                },
+                label = { Text("Toque livre") }
+            )
+            FilterChip(
+                selected = areaMode,
+                onClick = {
+                    areaMode = true
+                    chosenArea.set(null)
+                    drawnArea = null
+                    firstCorner = null
+                    selected.set(null)
+                    previous.set(null)
+                    selectionGeneration.incrementAndGet()
+                    overlay = overlay?.copy(contour=null,assessment=null,
+                        message="Marque dois cantos e depois toque dentro do objeto.")
+                },
+                label = { Text("Delimitar área") }
+            )
+        }
+        if (areaMode) {
+            OutlinedButton(onClick = {
+                chosenArea.set(null)
+                drawnArea = null
+                firstCorner = null
+                selected.set(null)
+                previous.set(null)
+                selectionGeneration.incrementAndGet()
+                overlay = overlay?.copy(contour=null,assessment=null,
+                    message="Marque novamente dois cantos e toque dentro do objeto.")
+            }) { Text("Redefinir área") }
+        }
+
+
         Text(overlay?.message ?: "Preparando câmera…",
             style = MaterialTheme.typography.bodyMedium)
         overlay?.contour?.let { contour ->
@@ -416,6 +448,9 @@ internal fun LiveContourCamera(
             "é apenas uma aproximação visual, mesmo quando a estabilidade aparece alta.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
