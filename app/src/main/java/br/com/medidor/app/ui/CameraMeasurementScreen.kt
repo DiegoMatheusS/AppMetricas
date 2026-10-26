@@ -83,7 +83,7 @@ fun CameraMeasurementScreen(onSave: (String, String) -> Unit) {
         granted = it
     }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var cameraMode by remember { mutableStateOf("photo") }
+    var cameraMode by remember { mutableStateOf("live") }
     var coin by remember { mutableStateOf(BrazilianCoin.TWENTY_FIVE_CENTS) }
     var mode by remember { mutableStateOf("coin") }
     var manualSize by remember { mutableStateOf("10") }
@@ -107,6 +107,22 @@ fun CameraMeasurementScreen(onSave: (String, String) -> Unit) {
                 screenError = "Não foi possível abrir a fotografia: ${e.localizedMessage}"
             }
         }
+    }
+    // The live analysis owns the entire portrait viewport. Photo calibration remains available
+    // after capturing an analyzed frame; live sizes are only fractions of the image.
+    if (bitmap == null && granted) {
+        LiveContourCamera(
+            onPhoto = {
+                bitmap = it
+                measureStyle = "contour"
+                points.clear()
+                seed = null
+                saved = false
+                screenError = null
+            },
+            onError = { error -> screenError = error }
+        )
+        return
     }
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
