@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
@@ -72,6 +73,7 @@ private data class ContourOverlay(
  * calibrated measurements. Tap an object to resample a color region every
  * ~250ms. This is NOT an ML object tracker or a depth sensor.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LiveContourCamera(
     onPhoto: (Bitmap) -> Unit,
