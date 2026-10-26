@@ -1,8 +1,5 @@
 package br.com.medidor.app.ui
 
-import android.app.Activity
-import android.content.pm.ActivityInfo
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,16 +59,6 @@ fun AppShell() {
         if (destination == Destination.HISTORY) records = store.load()
     }
     fun navigate(to: Destination) { destinationName = to.name }
-    val activity = context as? Activity
-    DisposableEffect(destination, activity) {
-        if (destination == Destination.PHOTO && activity != null) {
-            val previous = activity.requestedOrientation
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            onDispose { activity.requestedOrientation = previous }
-        } else {
-            onDispose { }
-        }
-    }
     BackHandler(enabled = showMore || destination != Destination.HOME) {
         if (showMore) showMore = false else navigate(Destination.HOME)
     }
@@ -120,7 +107,7 @@ fun AppShell() {
             }
         }
     }, topBar = {
-        TopAppBar(
+        if (destination != Destination.PHOTO) TopAppBar(
             title = { Text(destination.label, style = MaterialTheme.typography.titleLarge) },
             navigationIcon = {
                 if (destination != Destination.HOME) {
