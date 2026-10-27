@@ -72,6 +72,7 @@ fun BoxCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit =
         Text("Caixa ou ambiente retangular", style = MaterialTheme.typography.titleLarge)
         Text("Informe as medidas internas em metros para calcular a capacidade útil.",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        DimensionDiagram()
         BoxMeasurementGuide()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DimensionField("Comprimento", length, Modifier.weight(1f)) { length = it; saved = false }
@@ -136,6 +137,7 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
             }
         )
         TankOutline(TankIllustration.valueOf(illustration), Modifier.fillMaxWidth().padding(vertical = 8.dp).height(120.dp))
+        DimensionDiagram(selected)
         TankMeasurementGuide(selected)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DimensionField("Diâmetro (m)", diameter, Modifier.weight(1f)) { diameter = it; saved = false }
