@@ -7,24 +7,38 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+// Shared palette from the approved screen references; the app keeps its own name.
+private val Lime = Color(0xFFC0F565)
+private val Ink = Color(0xFF17251F)
+
 private val Light = lightColorScheme(
-    primary = Color(0xFF116678),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFD4F4F4),
-    secondary = Color(0xFF496775),
-    background = Color(0xFFF6F8FA),
-    surface = Color.White
+    primary = Lime,
+    onPrimary = Ink,
+    primaryContainer = Color(0xFFE8F9D0),
+    onPrimaryContainer = Ink,
+    secondary = Ink,
+    onSecondary = Color.White,
+    background = Color(0xFFF7F8F5),
+    surface = Color.White,
+    onSurface = Ink,
+    onBackground = Ink,
+    outline = Color(0xFFD9DFD6)
 )
+
 private val Dark = darkColorScheme(
-    primary = Color(0xFF80D6E9),
-    onPrimary = Color(0xFF003740),
-    primaryContainer = Color(0xFF164F5C),
-    secondary = Color(0xFFAFC7D1),
-    background = Color(0xFF10191D),
-    surface = Color(0xFF182328)
+    primary = Lime,
+    onPrimary = Ink,
+    primaryContainer = Color(0xFF34472E),
+    secondary = Color(0xFFB7D6B3),
+    background = Color(0xFF101C16),
+    surface = Color(0xFF1B2B22),
+    onSurface = Color(0xFFEAF2E6)
 )
 
 @Composable
 fun MedidorTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+    MaterialTheme(
+        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
+        content = content
+    )
 }

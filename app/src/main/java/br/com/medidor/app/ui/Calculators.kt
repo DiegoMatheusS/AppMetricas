@@ -1,5 +1,8 @@
 package br.com.medidor.app.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
@@ -99,11 +106,12 @@ fun BoxCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit =
 fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit = {}) {
     var shape by rememberSaveable { mutableStateOf(TankShape.VERTICAL.name) }
     var illustration by rememberSaveable { mutableStateOf(TankIllustration.VERTICAL.name) }
-    var diameter by rememberSaveable { mutableStateOf("8") }
-    var size by rememberSaveable { mutableStateOf("12") }
-    var level by rememberSaveable { mutableStateOf("5") }
+    var diameter by rememberSaveable { mutableStateOf("12") }
+    var size by rememberSaveable { mutableStateOf("8") }
+    var level by rememberSaveable { mutableStateOf("0") }
     var levelUnit by rememberSaveable { mutableStateOf(TankLevelUnit.METERS.name) }
     var densityText by rememberSaveable { mutableStateOf("") }
+    var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     val selected = TankShape.valueOf(shape)
     val d = parseDimension(diameter)
@@ -120,13 +128,30 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
         (density != null && density.isFinite() && density in 0.01..30000.0)
     val productMass = if (densityValid && result != null && density != null)
         TankFillInput.estimatedMassKg(result.occupiedM3, density) else null
+    val ink = Color(0xFF14251F)
+    val lime = Color(0xFFC0F565)
 
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        CameraFirstAction(onCamera)
-        Text("Quantidade armazenada no tanque", style = MaterialTheme.typography.titleLarge)
-        Text("Use dimensões INTERNAS em metros. Tanques ideais, sem acessórios e sem perdas.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Escolha o tipo de tanque", style = MaterialTheme.typography.titleMedium)
+    Column(
+        Modifier.background(Color(0xFFF7F8F5)).verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onCamera,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFE7EAE4), contentColor = ink)
+            ) { Text("Câmera") }
+            Button(
+                onClick = {},
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White, contentColor = ink)
+            ) { Text("Manual") }
+        }
+        Text("Escolha o formato do tanque",
+            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
         TankIllustrationPicker(
             selected = TankIllustration.valueOf(illustration),
             onSelect = { option ->
@@ -135,68 +160,129 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
                 saved = false
             }
         )
-        TankOutline(TankIllustration.valueOf(illustration), Modifier.fillMaxWidth().padding(vertical = 8.dp).height(120.dp))
-        TankMeasurementGuide(selected)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                Text(selected.label.uppercase(),
+                    color = Color(0xFF747E76), fontSize = 11.sp)
+                TankOutline(
+                    TankIllustration.valueOf(illustration),
+                    Modifier.fillMaxWidth().height(160.dp)
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Unidade de medida", style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF737C73))
+            Text("Metros (m)", style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold)
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DimensionField("Diâmetro (m)", diameter, Modifier.weight(1f)) { diameter = it; saved = false }
+            DimensionField("Diâmetro interno (m)", diameter, Modifier.weight(1f)) {
+                diameter = it; saved = false
+            }
             if (selected != TankShape.SPHERE) {
-                DimensionField(if (selected == TankShape.VERTICAL) "Altura (m)" else "Comprimento (m)", size, Modifier.weight(1f)) { size = it; saved = false }
+                DimensionField(
+                    if (selected == TankShape.VERTICAL) "Altura útil (m)"
+                    else "Comprimento (m)",
+                    size, Modifier.weight(1f)
+                ) { size = it; saved = false }
             }
         }
-        Text("Altura atual do líquido ou produto, medida a partir do fundo:",
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = ink),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("CAPACIDADE TOTAL", fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.7f))
+                Text(
+                    if (result != null) "${decimal(result.capacityM3)} m³"
+                    else "— m³",
+                    color = lime, fontSize = 30.sp, fontWeight = FontWeight.Medium
+                )
+                Text(
+                    if (result != null) "${decimal(Geometry.liters(result.capacityM3))} litros"
+                    else "Informe as dimensões internas",
+                    style = MaterialTheme.typography.bodyMedium, color = Color.White
+                )
+                Text("Capacidade geométrica estimada, não volume atual do líquido.",
+                    color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            }
+        }
+        Text("▾ Nível do produto e cálculos adicionais",
+            modifier = Modifier.fillMaxWidth()
+                .clickable { detailsOpen = !detailsOpen }
+                .padding(vertical = 10.dp),
             style = MaterialTheme.typography.titleSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TankLevelUnit.entries.forEach { choice ->
-                FilterChip(selected = choice.name == levelUnit, onClick = {
-                    levelUnit = choice.name
-                    level = when(choice) {
-                        TankLevelUnit.METERS -> if (lv != null) decimal(lv) else "0"
-                        TankLevelUnit.CENTIMETERS -> if (lv != null) decimal(lv*100) else "0"
-                        TankLevelUnit.HEIGHT_PERCENT -> if (lv != null && maxLevel != null)
-                            decimal(lv/maxLevel*100) else "0"
-                    }
-                    saved = false
-                }, label = { Text(choice.label) })
+        if (detailsOpen) {
+            Text("Informe o nível atual do produto, medido a partir do fundo.",
+                style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                TankLevelUnit.entries.forEach { choice ->
+                    FilterChip(selected = choice.name == levelUnit, onClick = {
+                        levelUnit = choice.name
+                        level = when(choice) {
+                            TankLevelUnit.METERS -> if (lv != null) decimal(lv) else "0"
+                            TankLevelUnit.CENTIMETERS -> if (lv != null) decimal(lv*100) else "0"
+                            TankLevelUnit.HEIGHT_PERCENT -> if (lv != null && maxLevel != null)
+                                decimal(lv/maxLevel*100) else "0"
+                        }
+                        saved = false
+                    }, label = { Text(choice.label) })
+                }
             }
+            DimensionField("Nível (${unit.label})", level) {
+                level = it; saved = false
+            }
+            DimensionField("Densidade aparente (kg/m³, opcional)", densityText) {
+                densityText = it; saved = false
+            }
+            if (result != null) {
+                ResultCard("Volume atual", "${decimal(result.occupiedM3)} m³")
+                ResultCard("Espaço livre", "${decimal(result.freeM3)} m³")
+                ResultCard("Ocupação", "${decimal(result.fillPercent)}%")
+                if (productMass != null)
+                    ResultCard("Massa estimada", "${decimal(productMass)} kg")
+            }
+            if (!densityValid)
+                Text("Densidade inválida: use 0,01 a 30.000 kg/m³.",
+                    color = MaterialTheme.colorScheme.error)
         }
-        DimensionField("Nível a partir do fundo (${unit.label})", level) {
-            level = it; saved = false
-        }
-        DimensionField("Densidade aparente (kg/m³, opcional)", densityText) {
-            densityText = it; saved = false
-        }
-        Text("Informe a densidade aparente do produto para estimar também a massa. " +
-            "Para sólidos a granel, superfície irregular e compactação podem alterar a estimativa.",
-            style = MaterialTheme.typography.bodySmall)
-        Text("Resultado das medidas", style = MaterialTheme.typography.titleMedium)
         if (!valid) {
-            Text("Verifique as medidas. O nível deve ficar entre zero e a altura total " +
-                "(${maxLevel?.let(::decimal) ?: "—"} m).",
-                color = MaterialTheme.colorScheme.error)
-        } else {
-            ResultCard("Capacidade geométrica", "${decimal(result!!.capacityM3)} m³ • ${decimal(Geometry.liters(result.capacityM3))} L")
-            ResultCard("Volume do produto até ${decimal(lv!!)} m",
-                "${decimal(result.occupiedM3)} m³ • ${decimal(Geometry.liters(result.occupiedM3))} L")
-            ResultCard("Espaço livre",
-                "${decimal(result.freeM3)} m³ • ${decimal(Geometry.liters(result.freeM3))} L")
-            ResultCard("Ocupação", "${decimal(result.fillPercent)}% do volume total")
-            if (productMass != null) ResultCard("Massa estimada", "${decimal(productMass)} kg")
-            if (!densityValid) Text("Informe uma densidade válida de 0,01 a 30.000 kg/m³.",
+            Text("Confira as dimensões e o nível: use valores internos válidos.",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error)
         }
-        Button(enabled = valid && densityValid, onClick = {
-            onSave(selected.label, "Capacidade: ${decimal(result!!.capacityM3)} m³ | " +
-                "Produto: ${decimal(result.occupiedM3)} m³ (${decimal(Geometry.liters(result.occupiedM3))} L) | " +
-                "Nível: ${decimal(lv!!)} m" +
-                (if (productMass != null) " | Massa estimada: ${decimal(productMass)} kg" else ""))
-            saved = true
-        }) { Text("Salvar cálculo") }
-        if (saved) Text("Cálculo salvo neste aparelho.", color = MaterialTheme.colorScheme.primary)
-        Text("Cálculo para geometria interna ideal; não considera fundo irregular, " +
-            "teto, tubulações ou volume morto. Percentual da altura não é igual ao " +
-            "percentual do volume nos tanques esféricos e horizontais. " +
-            "Não substituir arqueação certificada.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(
+            enabled = valid && densityValid,
+            onClick = {
+                onSave(selected.label, "Capacidade: ${decimal(result!!.capacityM3)} m³ | " +
+                    "Produto: ${decimal(result.occupiedM3)} m³ | Nível: ${decimal(lv!!)} m" +
+                    (if (productMass != null)
+                        " | Massa: ${decimal(productMass)} kg" else ""))
+                saved = true
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = lime, contentColor = ink)
+        ) {
+            Text("Salvar cálculo ✓", fontWeight = FontWeight.Medium)
+        }
+        if (saved) Text("Cálculo salvo neste aparelho.")
+        Text("Os cálculos representam sólidos geométricos ideais. Sem aferição de " +
+            "dimensões, não há garantia de capacidade real ou arqueação certificada.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TankMeasurementGuide(selected)
     }
 }
 
