@@ -123,7 +123,8 @@ fun AppShell() {
                 Destination.ARCHITECT -> ArchitectScreen()
                 Destination.ARCHITECT_SCAN -> ArchitectScanScreen(
                     onBack = { navigate(Destination.HOME) },
-                    onCaptured = { navigate(Destination.ARCHITECT_REVIEW) }
+                    onCaptured = { /* Remain in the live camera after scanning. */ },
+                    onReview = { navigate(Destination.ARCHITECT_REVIEW) }
                 )
                 Destination.SCANNER -> ScannerCaptureScreen()
                 Destination.ARCHITECT_REVIEW -> ArchitectReviewScreen(

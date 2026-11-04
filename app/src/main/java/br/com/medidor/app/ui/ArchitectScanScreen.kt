@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +35,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,10 +44,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.data.ArchitectPlanStore
+import br.com.medidor.app.domain.Architect3dGeometry
 import java.io.File
 
 /**
@@ -53,7 +59,11 @@ import java.io.File
  * calibrated and traced; no walls/scale are inferred from pixels.
  */
 @Composable
-fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
+fun ArchitectScanScreen(
+    onBack: () -> Unit,
+    onCaptured: () -> Unit,
+    onReview: () -> Unit = {}
+) {
     val context = LocalContext.current
     val owner = context as? ComponentActivity
     val ink = Color(0xFF14251F)
@@ -72,14 +82,24 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var confirmOverwrite by remember { mutableStateOf(false) }
     var allowOverwrite by remember { mutableStateOf(false) }
+    var scanMode by rememberSaveable { mutableStateOf("capture") }
+    var paperWidthText by rememberSaveable { mutableStateOf("21") }
+    var appliedPaperWidth by rememberSaveable { mutableStateOf(21f) }
+    var arStatus by remember { mutableStateOf("Aponte para a folha impressa.") }
+    var scanInfo by remember { mutableStateOf<String?>(null) }
+    val storage = remember(context) { ArchitectPlanStore(context.applicationContext) }
+    var plan by remember { mutableStateOf(storage.load()) }
+    val floor = plan.floors.getOrNull(plan.selectedFloor)
+    val arReady = floor?.calibrated == true && floor.imageFile != null &&
+        Architect3dGeometry.model(plan, allFloors = true).isNotEmpty()
     val view = remember(context) {
         PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
     }
 
-    DisposableEffect(granted, owner, view) {
+    DisposableEffect(granted, owner, view, scanMode) {
         var disposed = false
         var provider: ProcessCameraProvider? = null
-        if (granted && owner != null) {
+        if (granted && owner != null && scanMode == "capture") {
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener({
                 if (!disposed) try {
@@ -133,8 +153,14 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
     }
     Box(Modifier.fillMaxSize().background(ink)) {
         if (granted) {
-            AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
-            Canvas(Modifier.fillMaxSize()) {
+            if (scanMode == "ar") {
+                ArchitectPaperArPreview(
+                    printedWidthCm = appliedPaperWidth,
+                    onStatus = { arStatus = it }
+                )
+            } else {
+                AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+                Canvas(Modifier.fillMaxSize()) {
                 val x0 = size.width * .08f
                 val x1 = size.width * .92f
                 val y0 = size.height * .19f
@@ -150,6 +176,7 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
                     val vertical = if (index < 2) span else -span
                     drawLine(lime, point, Offset(point.x + horizontal, point.y), stroke)
                     drawLine(lime, point, Offset(point.x, point.y + vertical), stroke)
+                }
                 }
             }
         }
@@ -167,7 +194,7 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
             Column {
                 Text("Arquiteto", fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold, color = Color.White)
-                Text("NOVA PLANTA", fontSize = 10.sp,
+                Text(if (scanMode == "ar") "SOBREPOSIÇÃO NO PAPEL • ARCORE" else "CAPTURA DE PLANTA", fontSize = 10.sp,
                     color = Color.White.copy(alpha = .75f))
             }
         }
@@ -180,9 +207,38 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
         ) {
             Text("Da planta ao espaço", fontWeight = FontWeight.SemiBold,
                 fontSize = 17.sp, color = Color.White)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                FilterChip(
+                    selected = scanMode == "capture",
+                    onClick = {
+                        scanMode = "capture"
+                        error = null
+                    },
+                    label = { Text("Capturar / Scanear") },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterChip(
+                    selected = scanMode == "ar",
+                    onClick = {
+                        if (arReady) {
+                            scanMode = "ar"
+                            error = null
+                        } else {
+                            error = "Para usar AR sobre o papel, capture uma planta, " +
+                                "calibre a escala e desenhe as paredes no editor 2D."
+                        }
+                    },
+                    label = { Text("Sobrepor no papel AR") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
             Text(
-                "Enquadre toda a folha, sem dobras ou sombras. Depois confirme " +
-                    "uma medida real para ajustar a escala.",
+                if (scanMode == "ar") arStatus
+                else "Enquadre toda a folha. A captura fica no projeto para " +
+                    "revisão 2D e futura sobreposição AR.",
                 fontSize = 12.sp, color = Color.White.copy(alpha = .75f)
             )
             if (!granted) {
@@ -191,6 +247,38 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(
                         containerColor = lime, contentColor = ink
                     )) { Text("Permitir câmera") }
+            } else if (scanMode == "ar") {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = paperWidthText,
+                        onValueChange = { paperWidthText = it },
+                        label = { Text("Largura da folha (cm)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    )
+                    Button(onClick = {
+                        val newWidth = paperWidthText.replace(',', '.').toFloatOrNull()
+                        if (newWidth != null && newWidth.isFinite() && newWidth > 0f &&
+                            newWidth <= 200f) {
+                            appliedPaperWidth = newWidth
+                            error = null
+                        } else {
+                            error = "Informe a largura impressa entre 0 e 200 cm."
+                        }
+                    }) { Text("Aplicar") }
+                }
+                Button(
+                    onClick = onReview,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = lime, contentColor = ink
+                    )
+                ) { Text("Revisar planta e paredes") }
             } else {
                 Button(
                     enabled = capture != null && !busy,
@@ -237,6 +325,10 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
                                             secondAlignmentPoint = null
                                         )
                                         storage.save(current.copy(floors = floors))
+                                        plan = storage.load()
+                                        allowOverwrite = false
+                                        scanInfo = "Planta salva. Revise a escala e as paredes para " +
+                                            "sobrepor a maquete no papel."
                                         onCaptured()
                                     } catch (e: Exception) {
                                         error = "Falha ao salvar planta: ${e.localizedMessage}"
@@ -264,12 +356,16 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
                 ) { Text(if (busy) "Salvando planta..." else "Escanear planta",
                     fontWeight = FontWeight.SemiBold) }
             }
-            error?.let {
-                Text(it, color = Color(0xFFFFC2B2), fontSize = 12.sp)
+            if (scanMode == "capture" && floor?.imageFile != null) {
+                TextButton(onClick = onReview) {
+                    Text("Revisar planta 2D / preparar 3D", color = lime)
+                }
             }
+            scanInfo?.let { Text(it, color = lime, fontSize = 12.sp) }
+            error?.let { Text(it, color = Color(0xFFFFC2B2), fontSize = 12.sp) }
             Text(
-                "O desenho será aberto na revisão 2D. Paredes e escala " +
-                    "não são reconhecidas automaticamente.",
+                "A sobreposição AR usa rastreamento real do papel no ARCore. " +
+                    "Requer aparelho compatível e planta previamente calibrada.",
                 color = Color.White.copy(alpha = .65f), fontSize = 10.sp
             )
         }

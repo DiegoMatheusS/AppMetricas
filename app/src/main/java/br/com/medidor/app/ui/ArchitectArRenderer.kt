@@ -1,6 +1,7 @@
 package br.com.medidor.app.ui
 
 import android.graphics.Bitmap
+import androidx.activity.ComponentActivity
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
@@ -28,7 +29,7 @@ import javax.microedition.khronos.opengles.GL10
  * AR model coordinates: X to right, Y up, Z toward image-top.
  */
 internal class ArchitectArRenderer(
-    private val activity: ArchitectArActivity,
+    private val activity: ComponentActivity,
     private val faces: List<ModelFace>,
     val mode: String,
     initialScale: Float,
