@@ -73,7 +73,13 @@ import kotlin.math.min
  * Never use this for depth, distant tanks or non-coplanar objects.
  */
 @Composable
-fun CameraMeasurementScreen(onSave: (String, String) -> Unit) {
+fun CameraMeasurementScreen(
+    onSave: (String, String) -> Unit,
+    liveTool: LiveMeasureTool = LiveMeasureTool.RULER,
+    onBack: () -> Unit = {},
+    onManual: () -> Unit = {},
+    onSwitchTool: (LiveMeasureTool) -> Unit = {}
+) {
     val context = LocalContext.current
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -120,7 +126,11 @@ fun CameraMeasurementScreen(onSave: (String, String) -> Unit) {
                 saved = false
                 screenError = null
             },
-            onError = { error -> screenError = error }
+            onError = { error -> screenError = error },
+            tool = liveTool,
+            onBack = onBack,
+            onManual = onManual,
+            onSwitchTool = onSwitchTool
         )
         return
     }
@@ -158,7 +168,11 @@ fun CameraMeasurementScreen(onSave: (String, String) -> Unit) {
                             saved = false
                             screenError = null
                         },
-                        onError = { error -> screenError = error }
+                        onError = { error -> screenError = error },
+                        tool = liveTool,
+                        onBack = onBack,
+                        onManual = onManual,
+                        onSwitchTool = onSwitchTool
                     )
                 } else {
                     CameraPreviewAndCapture(
