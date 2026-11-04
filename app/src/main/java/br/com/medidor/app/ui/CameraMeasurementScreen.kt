@@ -167,7 +167,7 @@ fun CameraMeasurementScreen(
                     LiveContourCamera(
                         onPhoto = {
                             bitmap = it
-                            measureStyle = "contour"
+                            measureStyle = if (liveTool == LiveMeasureTool.AREA) "area" else "distance"
                             points.clear()
                             seed = null
                             saved = false
@@ -332,20 +332,72 @@ fun CameraMeasurementScreen(
                     }
                 ) {
                     val rect = imageRect(size.width, size.height, photo.width, photo.height)
-                    points.forEachIndexed { index, point ->
-                        val center = Offset(rect.left + rect.width * point.x, rect.top + rect.height * point.y)
-                        drawCircle(
-                            color = if (index < 2) Color(0xFFFFB443) else Color(0xFF4EE0C1),
-                            radius = 7.dp.toPx(),
-                            center = center
+                    val lime = Color(0xFFC0F565)
+                    val amber = Color(0xFFFFB443)
+                    val native = drawContext.canvas.nativeCanvas
+                    val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.argb(235, 20, 37, 31)
+                    }
+                    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 13.sp.toPx()
+                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        textAlign = Paint.Align.CENTER
+                    }
+                    fun pos(p: NormalizedPoint) = Offset(
+                        rect.left + rect.width * p.x,
+                        rect.top + rect.height * p.y
+                    )
+                    fun pill(label: String, where: Offset) {
+                        val extra = 8.dp.toPx()
+                        val w = textPaint.measureText(label) + 2 * extra
+                        val h = 24.dp.toPx()
+                        val midX = where.x.coerceIn(w / 2, size.width - w / 2)
+                        val midY = where.y.coerceIn(h / 2, size.height - h / 2)
+                        native.drawRoundRect(
+                            android.graphics.RectF(
+                                midX - w / 2, midY - h / 2,
+                                midX + w / 2, midY + h / 2
+                            ),
+                            8.dp.toPx(), 8.dp.toPx(), inkPaint
+                        )
+                        native.drawText(
+                            label, midX,
+                            midY - (textPaint.ascent() + textPaint.descent()) / 2,
+                            textPaint
                         )
                     }
+                    val referenceMm = if (mode == "coin") coin.diameterMm else
+                        PhotoCalibration.manualReferenceMillimeters(manualSize, manualUnit)
+                    val referencePx = if (points.size >= 2)
+                        PhotoCalibration.distancePixels(points[0], points[1], photo.width, photo.height)
+                    else null
+                    val millimetersPerPixel = if (
+                        referenceMm != null && referencePx != null &&
+                        ReferenceMarkQuality.isReadable(referencePx)
+                    ) referenceMm / referencePx else null
+                    fun edge(a: NormalizedPoint, b: NormalizedPoint, color: Color) {
+                        val from = pos(a)
+                        val to = pos(b)
+                        drawLine(color, from, to, strokeWidth = 3.dp.toPx())
+                        val scale = millimetersPerPixel
+                        if (scale != null) {
+                            val pixels = PhotoCalibration.distancePixels(a, b, photo.width, photo.height)
+                            val mm = pixels * scale
+                            val label = if (mm >= 1000)
+                                "${decimal(mm / 1000)} m"
+                            else "${decimal(mm / 10)} cm"
+                            pill(label, Offset((from.x + to.x) / 2, (from.y + to.y) / 2))
+                        }
+                    }
                     if (points.size >= 2) {
-                        val a = points[0]; val b = points[1]
-                        drawLine(Color(0xFFFFB443),
-                            Offset(rect.left + rect.width * a.x, rect.top + rect.height * a.y),
-                            Offset(rect.left + rect.width * b.x, rect.top + rect.height * b.y),
-                            strokeWidth = 3.dp.toPx())
+                        val a = pos(points[0])
+                        val b = pos(points[1])
+                        drawLine(amber, a, b, strokeWidth = 3.dp.toPx())
+                        if (referenceMm != null) {
+                            pill("REF ${decimal(referenceMm / 10)} cm",
+                                Offset((a.x + b.x) / 2, (a.y + b.y) / 2))
+                        }
                     }
 
                     if (measureStyle == "contour" && contour != null) {
@@ -357,21 +409,53 @@ fun CameraMeasurementScreen(
                                     rect.top + rect.height * (px.y.toFloat()/c.height))
                             )
                         }
-                        val x0=rect.left+rect.width*c.minX/c.width
-                        val x1=rect.left+rect.width*(c.maxX+1)/c.width
-                        val y0=rect.top+rect.height*c.minY/c.height
-                        val y1=rect.top+rect.height*(c.maxY+1)/c.height
-                        drawLine(Color(0xFF48F1AE), Offset(x0,y0),Offset(x1,y0),2.dp.toPx())
-                        drawLine(Color(0xFF48F1AE), Offset(x1,y0),Offset(x1,y1),2.dp.toPx())
-                        drawLine(Color(0xFF48F1AE), Offset(x1,y1),Offset(x0,y1),2.dp.toPx())
-                        drawLine(Color(0xFF48F1AE), Offset(x0,y1),Offset(x0,y0),2.dp.toPx())
+                        val x0 = rect.left + rect.width * c.minX / c.width
+                        val x1 = rect.left + rect.width * (c.maxX + 1) / c.width
+                        val y0 = rect.top + rect.height * c.minY / c.height
+                        val y1 = rect.top + rect.height * (c.maxY + 1) / c.height
+                        drawLine(lime, Offset(x0,y0), Offset(x1,y0), 2.dp.toPx())
+                        drawLine(lime, Offset(x1,y0), Offset(x1,y1), 2.dp.toPx())
+                        drawLine(lime, Offset(x1,y1), Offset(x0,y1), 2.dp.toPx())
+                        drawLine(lime, Offset(x0,y1), Offset(x0,y0), 2.dp.toPx())
                     }
-                    if (points.size >= 4) {
-                        val a = points[2]; val b = points[3]
-                        drawLine(Color(0xFF4EE0C1),
-                            Offset(rect.left + rect.width * a.x, rect.top + rect.height * a.y),
-                            Offset(rect.left + rect.width * b.x, rect.top + rect.height * b.y),
-                            strokeWidth = 3.dp.toPx())
+                    if (measureStyle == "distance" && points.size >= 4) {
+                        edge(points[2], points[3], lime)
+                    }
+                    if (measureStyle == "area") {
+                        val corners = points.drop(2)
+                        for (i in 1 until corners.size) edge(corners[i - 1], corners[i], lime)
+                        if (corners.size >= 3) {
+                            edge(corners.last(), corners.first(), lime)
+                            val pixelsArea = PointMeasurementGeometry.polygonAreaPixels2(
+                                corners, photo.width, photo.height
+                            )
+                            val area = if (pixelsArea != null && referenceMm != null &&
+                                referencePx != null &&
+                                ReferenceMarkQuality.isReadable(referencePx))
+                                PointMeasurementGeometry.areaSquareMillimeters(
+                                    pixelsArea, referenceMm, referencePx
+                                ) else null
+                            val centroid = Offset(
+                                corners.map { pos(it).x }.average().toFloat(),
+                                corners.map { pos(it).y }.average().toFloat()
+                            )
+                            if (area != null) pill(
+                                if (area >= 1_000_000)
+                                    "${decimal(area / 1_000_000)} m²"
+                                else "${decimal(area / 100)} cm²",
+                                centroid
+                            ) else if (pixelsArea == null)
+                                pill("Revise os cantos", centroid)
+                        }
+                    }
+                    points.forEachIndexed { index, point ->
+                        drawCircle(
+                            if (index < 2) amber else lime,
+                            6.5.dp.toPx(), pos(point)
+                        )
+                        drawCircle(
+                            Color(0xFF17251F), 2.5.dp.toPx(), pos(point)
+                        )
                     }
                 }
                 }
