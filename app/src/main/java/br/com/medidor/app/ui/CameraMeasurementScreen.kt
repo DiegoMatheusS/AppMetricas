@@ -143,7 +143,11 @@ fun CameraMeasurementScreen(
         Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Medir por fotografia", style = MaterialTheme.typography.titleLarge)
+        Text(
+            if (liveTool == LiveMeasureTool.AREA) "Área por pontos na câmera"
+            else "Régua por pontos na câmera",
+            style = MaterialTheme.typography.titleLarge
+        )
         Text("Calibre com uma moeda ou distância conhecida no MESMO PLANO da medida.",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (bitmap == null) {
@@ -217,7 +221,11 @@ fun CameraMeasurementScreen(
                     }, label = { Text("Contorno automático") })
                 }
             }
-            Text("2. Referência para a escala:", fontWeight = FontWeight.Medium)
+            Text("2. Calibre a escala antes de marcar o objeto:",
+                fontWeight = FontWeight.Medium)
+            Text("Marque dois pontos de uma distância conhecida ou os extremos " +
+                "de uma moeda no MESMO plano da medida.",
+                style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = mode == "coin", onClick = {
                     mode = "coin"; points.clear(); seed = null; saved = false
@@ -538,11 +546,50 @@ fun CameraMeasurementScreen(
                     "Aproxime a câmera ou marque uma referência maior para reduzir " +
                     "erros de toque.", color = MaterialTheme.colorScheme.error)
             }
-            val mm = if (points.size == 4 && referenceMm != null && referenceIsReadable) {
+            val mm = if (measureStyle == "distance" && points.size == 4 &&
+                referenceMm != null && referenceIsReadable) {
                 val target = PhotoCalibration.distancePixels(points[2], points[3], photo.width, photo.height)
                 PhotoCalibration.millimetersFromReference(
                     referenceMm, referencePixels!!, target)
             } else null
+
+            val polygonCorners = if (measureStyle == "area") points.drop(2) else emptyList()
+            val polygonPixels = if (polygonCorners.size >= 3)
+                PointMeasurementGeometry.polygonAreaPixels2(
+                    polygonCorners, photo.width, photo.height
+                ) else null
+            val squareMm = if (polygonPixels != null && referenceMm != null &&
+                referenceIsReadable && referencePixels != null)
+                PointMeasurementGeometry.areaSquareMillimeters(
+                    polygonPixels, referenceMm, referencePixels
+                ) else null
+            if (measureStyle == "area") {
+                when {
+                    polygonCorners.size >= 3 && polygonPixels == null ->
+                        Text("Linhas cruzadas ou cantos inválidos. Desfaça o último canto " +
+                            "e marque os vértices em sequência.",
+                            color = MaterialTheme.colorScheme.error)
+                    polygonCorners.size >= 3 && !referenceIsReadable ->
+                        Text("Para calcular m², marque primeiro uma referência " +
+                            "com pelo menos 20 pixels na foto.",
+                            color = MaterialTheme.colorScheme.error)
+                }
+                if (squareMm != null) {
+                    val summary = if (squareMm >= 1_000_000)
+                        "${decimal(squareMm / 1_000_000)} m²"
+                    else "${decimal(squareMm / 100)} cm²"
+                    ResultCard("Área estimada no mesmo plano", summary)
+                    Text("O resultado e as medidas dos lados aparecem diretamente " +
+                        "sobre as linhas. Revise cada canto antes de salvar.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = {
+                        onSave("Área por pontos", "${decimal(squareMm / 1_000_000)} m² " +
+                            "(estimada; ${polygonCorners.size} cantos, mesma escala e plano)")
+                        saved = true
+                    }) { Text("Salvar área") }
+                    if (saved) Text("Área salva neste aparelho.")
+                }
+            }
             if (measureStyle == "contour" && seed != null && contour == null) {
                 Text("Região não isolada. Escolha outro ponto ou ajuste a tolerância. " +
                     "O fundo pode ter cor semelhante ao objeto.",
@@ -573,11 +620,12 @@ fun CameraMeasurementScreen(
                     "não mede profundidade, curvas 3D nem objetos afastados.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            if (points.size == 4 && mm == null && referenceMm != null && referenceIsReadable) {
+            if (measureStyle == "distance" && points.size == 4 && mm == null &&
+                referenceMm != null && referenceIsReadable) {
                 Text("A referência precisa ter dois pontos diferentes.", color = MaterialTheme.colorScheme.error)
             }
             if (mm != null) {
-                ResultCard("Distância estimada no plano da moeda", "${decimal(mm)} mm • ${decimal(mm / 10)} cm")
+                ResultCard("Distância estimada no mesmo plano", "${decimal(mm)} mm • ${decimal(mm / 10)} cm")
                 Button(onClick = {
                     onSave("Foto ${if (mode == "coin") coin.label else "referência manual"}",
                         "${decimal(mm)} mm (estimado, mesmo plano; ref. ${decimal(referenceMm!!)} mm)")
