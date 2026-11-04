@@ -106,6 +106,19 @@ fun HomeScreen(
                     onClick = { onOpen(Destination.ARCHITECT_SCAN) }
                 )
             }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HomeToolCard(
+                    title = "Contar peças", subtitle = "Objetos iguais pela câmera",
+                    symbol = "◎", modifier = Modifier.weight(1f),
+                    onClick = { onOpen(Destination.COUNT) }
+                )
+                HomeToolCard(
+                    title = "Scanner 3D", subtitle = "Digitalize objetos",
+                    symbol = "◈", modifier = Modifier.weight(1f),
+                    onClick = { onOpen(Destination.SCANNER) }
+                )
+            }
             Spacer(Modifier.height(27.dp))
             Row(
                 Modifier.fillMaxWidth(),
