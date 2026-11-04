@@ -3,6 +3,8 @@ package br.com.medidor.app.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -56,12 +59,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.domain.BrazilianCoin
 import br.com.medidor.app.domain.LengthUnit
 import br.com.medidor.app.domain.NormalizedPoint
 import br.com.medidor.app.domain.PhotoCalibration
 import br.com.medidor.app.domain.PlanarContourSegmentation
+import br.com.medidor.app.domain.PointMeasurementGeometry
 import br.com.medidor.app.domain.PlanarContourResult
 import br.com.medidor.app.domain.ReferenceMarkQuality
 import java.io.File
@@ -93,7 +98,7 @@ fun CameraMeasurementScreen(
     var coin by remember { mutableStateOf(BrazilianCoin.TWENTY_FIVE_CENTS) }
     var mode by remember { mutableStateOf("coin") }
     var manualSize by remember { mutableStateOf("10") }
-    var measureStyle by remember { mutableStateOf("distance") }
+    var measureStyle by remember(liveTool) { mutableStateOf(if (liveTool == LiveMeasureTool.AREA) "area" else "distance") }
     var seed by remember { mutableStateOf<NormalizedPoint?>(null) }
     var tolerance by remember { mutableStateOf(32) }
     var manualUnit by remember { mutableStateOf(LengthUnit.CENTIMETERS) }
@@ -120,7 +125,7 @@ fun CameraMeasurementScreen(
         LiveContourCamera(
             onPhoto = {
                 bitmap = it
-                measureStyle = "contour"
+                measureStyle = if (liveTool == LiveMeasureTool.AREA) "area" else "distance"
                 points.clear()
                 seed = null
                 saved = false
@@ -138,7 +143,11 @@ fun CameraMeasurementScreen(
         Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Medir por fotografia", style = MaterialTheme.typography.titleLarge)
+        Text(
+            if (liveTool == LiveMeasureTool.AREA) "Área por pontos na câmera"
+            else "Régua por pontos na câmera",
+            style = MaterialTheme.typography.titleLarge
+        )
         Text("Calibre com uma moeda ou distância conhecida no MESMO PLANO da medida.",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (bitmap == null) {
@@ -162,7 +171,7 @@ fun CameraMeasurementScreen(
                     LiveContourCamera(
                         onPhoto = {
                             bitmap = it
-                            measureStyle = "contour"
+                            measureStyle = if (liveTool == LiveMeasureTool.AREA) "area" else "distance"
                             points.clear()
                             seed = null
                             saved = false
@@ -195,15 +204,28 @@ fun CameraMeasurementScreen(
         } else {
             val photo = bitmap!!
             Text("1. Tipo de medição:", fontWeight = FontWeight.Medium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = measureStyle == "distance", onClick = {
-                    measureStyle = "distance"; points.clear(); seed = null; saved = false
-                }, label = { Text("Distância manual") })
-                FilterChip(selected = measureStyle == "contour", onClick = {
-                    measureStyle = "contour"; points.clear(); seed = null; saved = false
-                }, label = { Text("Contorno por toque") })
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(selected = measureStyle == "distance", onClick = {
+                        measureStyle = "distance"; points.clear(); seed = null; saved = false
+                    }, label = { Text("Régua • 2 pontos") })
+                }
+                item {
+                    FilterChip(selected = measureStyle == "area", onClick = {
+                        measureStyle = "area"; points.clear(); seed = null; saved = false
+                    }, label = { Text("Área • marcar cantos") })
+                }
+                item {
+                    FilterChip(selected = measureStyle == "contour", onClick = {
+                        measureStyle = "contour"; points.clear(); seed = null; saved = false
+                    }, label = { Text("Contorno automático") })
+                }
             }
-            Text("2. Referência para a escala:", fontWeight = FontWeight.Medium)
+            Text("2. Calibre a escala antes de marcar o objeto:",
+                fontWeight = FontWeight.Medium)
+            Text("Marque dois pontos de uma distância conhecida ou os extremos " +
+                "de uma moeda no MESMO plano da medida.",
+                style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = mode == "coin", onClick = {
                     mode = "coin"; points.clear(); seed = null; saved = false
@@ -300,10 +322,15 @@ fun CameraMeasurementScreen(
                     Modifier.fillMaxSize().pointerInput(photo, measureStyle) {
                         detectTapGestures { touch ->
                             val mapped = photoPointFromTouch(touch, size, photo.width, photo.height)
-                            if (mapped != null && points.size < 4) {
+                            val limit = when (measureStyle) {
+                                "contour" -> 2
+                                "area" -> 14 // 2 reference points + 12 corners
+                                else -> 4
+                            }
+                            if (mapped != null) {
                                 if (measureStyle == "contour" && points.size >= 2) {
                                     seed = mapped
-                                } else if (points.size < (if (measureStyle == "contour") 2 else 4)) {
+                                } else if (points.size < limit) {
                                     points.add(mapped)
                                     selectedPointIndex = points.lastIndex
                                 }
@@ -313,20 +340,72 @@ fun CameraMeasurementScreen(
                     }
                 ) {
                     val rect = imageRect(size.width, size.height, photo.width, photo.height)
-                    points.forEachIndexed { index, point ->
-                        val center = Offset(rect.left + rect.width * point.x, rect.top + rect.height * point.y)
-                        drawCircle(
-                            color = if (index < 2) Color(0xFFFFB443) else Color(0xFF4EE0C1),
-                            radius = 7.dp.toPx(),
-                            center = center
+                    val lime = Color(0xFFC0F565)
+                    val amber = Color(0xFFFFB443)
+                    val native = drawContext.canvas.nativeCanvas
+                    val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.argb(235, 20, 37, 31)
+                    }
+                    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = 13.sp.toPx()
+                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        textAlign = Paint.Align.CENTER
+                    }
+                    fun pos(p: NormalizedPoint) = Offset(
+                        rect.left + rect.width * p.x,
+                        rect.top + rect.height * p.y
+                    )
+                    fun pill(label: String, where: Offset) {
+                        val extra = 8.dp.toPx()
+                        val w = textPaint.measureText(label) + 2 * extra
+                        val h = 24.dp.toPx()
+                        val midX = where.x.coerceIn(w / 2, size.width - w / 2)
+                        val midY = where.y.coerceIn(h / 2, size.height - h / 2)
+                        native.drawRoundRect(
+                            android.graphics.RectF(
+                                midX - w / 2, midY - h / 2,
+                                midX + w / 2, midY + h / 2
+                            ),
+                            8.dp.toPx(), 8.dp.toPx(), inkPaint
+                        )
+                        native.drawText(
+                            label, midX,
+                            midY - (textPaint.ascent() + textPaint.descent()) / 2,
+                            textPaint
                         )
                     }
+                    val referenceMm = if (mode == "coin") coin.diameterMm else
+                        PhotoCalibration.manualReferenceMillimeters(manualSize, manualUnit)
+                    val referencePx = if (points.size >= 2)
+                        PhotoCalibration.distancePixels(points[0], points[1], photo.width, photo.height)
+                    else null
+                    val millimetersPerPixel = if (
+                        referenceMm != null && referencePx != null &&
+                        ReferenceMarkQuality.isReadable(referencePx)
+                    ) referenceMm / referencePx else null
+                    fun edge(a: NormalizedPoint, b: NormalizedPoint, color: Color) {
+                        val from = pos(a)
+                        val to = pos(b)
+                        drawLine(color, from, to, strokeWidth = 3.dp.toPx())
+                        val scale = millimetersPerPixel
+                        if (scale != null) {
+                            val pixels = PhotoCalibration.distancePixels(a, b, photo.width, photo.height)
+                            val mm = pixels * scale
+                            val label = if (mm >= 1000)
+                                "${decimal(mm / 1000)} m"
+                            else "${decimal(mm / 10)} cm"
+                            pill(label, Offset((from.x + to.x) / 2, (from.y + to.y) / 2))
+                        }
+                    }
                     if (points.size >= 2) {
-                        val a = points[0]; val b = points[1]
-                        drawLine(Color(0xFFFFB443),
-                            Offset(rect.left + rect.width * a.x, rect.top + rect.height * a.y),
-                            Offset(rect.left + rect.width * b.x, rect.top + rect.height * b.y),
-                            strokeWidth = 3.dp.toPx())
+                        val a = pos(points[0])
+                        val b = pos(points[1])
+                        drawLine(amber, a, b, strokeWidth = 3.dp.toPx())
+                        if (referenceMm != null) {
+                            pill("REF ${decimal(referenceMm / 10)} cm",
+                                Offset((a.x + b.x) / 2, (a.y + b.y) / 2))
+                        }
                     }
 
                     if (measureStyle == "contour" && contour != null) {
@@ -338,21 +417,53 @@ fun CameraMeasurementScreen(
                                     rect.top + rect.height * (px.y.toFloat()/c.height))
                             )
                         }
-                        val x0=rect.left+rect.width*c.minX/c.width
-                        val x1=rect.left+rect.width*(c.maxX+1)/c.width
-                        val y0=rect.top+rect.height*c.minY/c.height
-                        val y1=rect.top+rect.height*(c.maxY+1)/c.height
-                        drawLine(Color(0xFF48F1AE), Offset(x0,y0),Offset(x1,y0),2.dp.toPx())
-                        drawLine(Color(0xFF48F1AE), Offset(x1,y0),Offset(x1,y1),2.dp.toPx())
-                        drawLine(Color(0xFF48F1AE), Offset(x1,y1),Offset(x0,y1),2.dp.toPx())
-                        drawLine(Color(0xFF48F1AE), Offset(x0,y1),Offset(x0,y0),2.dp.toPx())
+                        val x0 = rect.left + rect.width * c.minX / c.width
+                        val x1 = rect.left + rect.width * (c.maxX + 1) / c.width
+                        val y0 = rect.top + rect.height * c.minY / c.height
+                        val y1 = rect.top + rect.height * (c.maxY + 1) / c.height
+                        drawLine(lime, Offset(x0,y0), Offset(x1,y0), 2.dp.toPx())
+                        drawLine(lime, Offset(x1,y0), Offset(x1,y1), 2.dp.toPx())
+                        drawLine(lime, Offset(x1,y1), Offset(x0,y1), 2.dp.toPx())
+                        drawLine(lime, Offset(x0,y1), Offset(x0,y0), 2.dp.toPx())
                     }
-                    if (points.size >= 4) {
-                        val a = points[2]; val b = points[3]
-                        drawLine(Color(0xFF4EE0C1),
-                            Offset(rect.left + rect.width * a.x, rect.top + rect.height * a.y),
-                            Offset(rect.left + rect.width * b.x, rect.top + rect.height * b.y),
-                            strokeWidth = 3.dp.toPx())
+                    if (measureStyle == "distance" && points.size >= 4) {
+                        edge(points[2], points[3], lime)
+                    }
+                    if (measureStyle == "area") {
+                        val corners = points.drop(2)
+                        for (i in 1 until corners.size) edge(corners[i - 1], corners[i], lime)
+                        if (corners.size >= 3) {
+                            edge(corners.last(), corners.first(), lime)
+                            val pixelsArea = PointMeasurementGeometry.polygonAreaPixels2(
+                                corners, photo.width, photo.height
+                            )
+                            val area = if (pixelsArea != null && referenceMm != null &&
+                                referencePx != null &&
+                                ReferenceMarkQuality.isReadable(referencePx))
+                                PointMeasurementGeometry.areaSquareMillimeters(
+                                    pixelsArea, referenceMm, referencePx
+                                ) else null
+                            val centroid = Offset(
+                                corners.map { pos(it).x }.average().toFloat(),
+                                corners.map { pos(it).y }.average().toFloat()
+                            )
+                            if (area != null) pill(
+                                if (area >= 1_000_000)
+                                    "${decimal(area / 1_000_000)} m²"
+                                else "${decimal(area / 100)} cm²",
+                                centroid
+                            ) else if (pixelsArea == null)
+                                pill("Revise os cantos", centroid)
+                        }
+                    }
+                    points.forEachIndexed { index, point ->
+                        drawCircle(
+                            if (index < 2) amber else lime,
+                            6.5.dp.toPx(), pos(point)
+                        )
+                        drawCircle(
+                            Color(0xFF17251F), 2.5.dp.toPx(), pos(point)
+                        )
                     }
                 }
                 }
@@ -366,7 +477,11 @@ fun CameraMeasurementScreen(
                         FilterChip(
                             selected = selectedPointIndex == index,
                             onClick = { selectedPointIndex = index },
-                            label = { Text(if (index < 2) "Referência ${index + 1}" else "Medida ${index - 1}") }
+                            label = {
+                                Text(if (index < 2) "Referência ${index + 1}"
+                                    else if (measureStyle == "area") "Canto ${index - 1}"
+                                    else "Medida ${index - 1}")
+                            }
                         )
                     }
                 }
@@ -396,6 +511,14 @@ fun CameraMeasurementScreen(
                 points.size == 1 -> "Marque o segundo ponto da referência."
                 measureStyle == "contour" && seed == null -> "Toque dentro do objeto para tentar detectar o contorno."
                 measureStyle == "contour" -> "Confira o contorno estimado e as dimensões."
+                measureStyle == "area" && points.size == 2 ->
+                    "Marque o primeiro canto da área, mantendo tudo no mesmo plano."
+                measureStyle == "area" && points.size < 5 ->
+                    "Marque pelo menos 3 cantos na ordem, sem cruzar as linhas."
+                measureStyle == "area" && points.size < 14 ->
+                    "Área fechada automaticamente. Continue marcando cantos ou salve."
+                measureStyle == "area" ->
+                    "Limite de 12 cantos. Confira o polígono."
                 points.size == 2 -> "Toque no início da distância."
                 points.size == 3 -> "Toque no fim da distância."
                 else -> "Medição concluída. Confira os pontos."
@@ -423,11 +546,50 @@ fun CameraMeasurementScreen(
                     "Aproxime a câmera ou marque uma referência maior para reduzir " +
                     "erros de toque.", color = MaterialTheme.colorScheme.error)
             }
-            val mm = if (points.size == 4 && referenceMm != null && referenceIsReadable) {
+            val mm = if (measureStyle == "distance" && points.size == 4 &&
+                referenceMm != null && referenceIsReadable) {
                 val target = PhotoCalibration.distancePixels(points[2], points[3], photo.width, photo.height)
                 PhotoCalibration.millimetersFromReference(
                     referenceMm, referencePixels!!, target)
             } else null
+
+            val polygonCorners = if (measureStyle == "area") points.drop(2) else emptyList()
+            val polygonPixels = if (polygonCorners.size >= 3)
+                PointMeasurementGeometry.polygonAreaPixels2(
+                    polygonCorners, photo.width, photo.height
+                ) else null
+            val squareMm = if (polygonPixels != null && referenceMm != null &&
+                referenceIsReadable && referencePixels != null)
+                PointMeasurementGeometry.areaSquareMillimeters(
+                    polygonPixels, referenceMm, referencePixels
+                ) else null
+            if (measureStyle == "area") {
+                when {
+                    polygonCorners.size >= 3 && polygonPixels == null ->
+                        Text("Linhas cruzadas ou cantos inválidos. Desfaça o último canto " +
+                            "e marque os vértices em sequência.",
+                            color = MaterialTheme.colorScheme.error)
+                    polygonCorners.size >= 3 && !referenceIsReadable ->
+                        Text("Para calcular m², marque primeiro uma referência " +
+                            "com pelo menos 20 pixels na foto.",
+                            color = MaterialTheme.colorScheme.error)
+                }
+                if (squareMm != null) {
+                    val summary = if (squareMm >= 1_000_000)
+                        "${decimal(squareMm / 1_000_000)} m²"
+                    else "${decimal(squareMm / 100)} cm²"
+                    ResultCard("Área estimada no mesmo plano", summary)
+                    Text("O resultado e as medidas dos lados aparecem diretamente " +
+                        "sobre as linhas. Revise cada canto antes de salvar.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = {
+                        onSave("Área por pontos", "${decimal(squareMm / 1_000_000)} m² " +
+                            "(estimada; ${polygonCorners.size} cantos, mesma escala e plano)")
+                        saved = true
+                    }) { Text("Salvar área") }
+                    if (saved) Text("Área salva neste aparelho.")
+                }
+            }
             if (measureStyle == "contour" && seed != null && contour == null) {
                 Text("Região não isolada. Escolha outro ponto ou ajuste a tolerância. " +
                     "O fundo pode ter cor semelhante ao objeto.",
@@ -458,11 +620,12 @@ fun CameraMeasurementScreen(
                     "não mede profundidade, curvas 3D nem objetos afastados.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            if (points.size == 4 && mm == null && referenceMm != null && referenceIsReadable) {
+            if (measureStyle == "distance" && points.size == 4 && mm == null &&
+                referenceMm != null && referenceIsReadable) {
                 Text("A referência precisa ter dois pontos diferentes.", color = MaterialTheme.colorScheme.error)
             }
             if (mm != null) {
-                ResultCard("Distância estimada no plano da moeda", "${decimal(mm)} mm • ${decimal(mm / 10)} cm")
+                ResultCard("Distância estimada no mesmo plano", "${decimal(mm)} mm • ${decimal(mm / 10)} cm")
                 Button(onClick = {
                     onSave("Foto ${if (mode == "coin") coin.label else "referência manual"}",
                         "${decimal(mm)} mm (estimado, mesmo plano; ref. ${decimal(referenceMm!!)} mm)")

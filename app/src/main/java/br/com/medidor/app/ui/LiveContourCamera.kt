@@ -242,6 +242,37 @@ internal fun LiveContourCamera(
         }
     }
 
+    var capturing by remember { mutableStateOf(false) }
+    fun captureMeasurement() {
+        val camera = capture ?: return
+        if (capturing) return
+        capturing = true
+        val file = File(
+            context.cacheDir, "medicao_${SystemClock.elapsedRealtimeNanos()}.jpg"
+        )
+        camera.takePicture(
+            ImageCapture.OutputFileOptions.Builder(file).build(),
+            mainExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    try {
+                        latestPhoto(SampledPhotos.fromFile(file))
+                    } catch (e: Exception) {
+                        latestError(e.localizedMessage ?: "Falha ao abrir imagem capturada.")
+                    } finally {
+                        capturing = false
+                        file.delete()
+                    }
+                }
+                override fun onError(exception: androidx.camera.core.ImageCaptureException) {
+                    capturing = false
+                    file.delete()
+                    latestError(exception.localizedMessage ?: "Falha ao capturar imagem.")
+                }
+            }
+        )
+    }
+
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
@@ -424,9 +455,9 @@ internal fun LiveContourCamera(
             Text(
                 when (tool) {
                     LiveMeasureTool.RULER ->
-                        "Toque no objeto para detectar o contorno. Para obter centímetros, capture e calibre com uma referência conhecida."
+                        "Capture a imagem e toque nos dois extremos da medida. Uma referência calibrada no mesmo plano é necessária para obter centímetros."
                     LiveMeasureTool.AREA ->
-                        "Aponte para a superfície e analise seu contorno. A área real exige escala e pontos do mesmo plano."
+                        "Capture a imagem, depois marque os cantos da área em sequência. Calibre com uma referência no mesmo plano para calcular m²."
                     LiveMeasureTool.TANK ->
                         "Aponte e mova-se ao redor do tanque para inspecionar seu contorno. O deslocamento ainda não produz medidas 3D."
                 },
@@ -441,7 +472,11 @@ internal fun LiveContourCamera(
                 )
             }
             Button(
-                onClick = { if (tool == LiveMeasureTool.TANK) onManual() else menuOpen = true },
+                onClick = {
+                    if (tool == LiveMeasureTool.TANK) onManual()
+                    else captureMeasurement()
+                },
+                enabled = tool == LiveMeasureTool.TANK || (capture != null && !capturing),
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = lime, contentColor = ink
@@ -450,7 +485,7 @@ internal fun LiveContourCamera(
             ) {
                 Text(
                     if (tool == LiveMeasureTool.TANK) "Informar dimensões do tanque"
-                    else "Capturar e calibrar medida",
+                    else if (capturing) "Capturando..." else "Marcar pontos na câmera",
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -554,27 +589,10 @@ internal fun LiveContourCamera(
                 }
             }
         }
-        if (tool != LiveMeasureTool.TANK) Button(enabled = capture != null,onClick = {
-            val camera = capture ?: return@Button
-            val file = File(context.cacheDir,
-                "contorno_${SystemClock.elapsedRealtimeNanos()}.jpg")
-            camera.takePicture(
-                ImageCapture.OutputFileOptions.Builder(file).build(),
-                mainExecutor,
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                        try { latestPhoto(SampledPhotos.fromFile(file)) }
-                        catch (e: Exception) {
-                            latestError(e.localizedMessage ?: "Falha ao abrir a foto.")
-                        } finally { file.delete() }
-                    }
-                    override fun onError(exception: androidx.camera.core.ImageCaptureException) {
-                        file.delete()
-                        latestError(exception.localizedMessage ?: "Falha na captura.")
-                    }
-                }
-            )
-        }) { Text("Capturar foto para medir em cm") }
+        if (tool != LiveMeasureTool.TANK) Button(
+            enabled = capture != null && !capturing,
+            onClick = { menuOpen = false; captureMeasurement() }
+        ) { Text("Capturar e marcar pontos") }
         Text(
             if (tool == LiveMeasureTool.TANK)
                 "A câmera identifica contornos aproximados, mas ainda não reconstrói a " +
