@@ -32,6 +32,7 @@ enum class Destination(val label: String) {
     HISTORY("Minhas medições"),
     PRO("Pro completo"),
     ARCHITECT("Modo Arquiteto"),
+    ARCHITECT_SCAN("Escanear planta pela câmera"),
     SCANNER("Scanner 3D"),
     COUNT("Contador de objetos"),
     MORE("Ferramentas e ajustes")
@@ -64,6 +65,7 @@ fun AppShell() {
     val liveCamera = destination == Destination.RULER ||
         destination == Destination.AREA ||
         destination == Destination.TANK_CAMERA ||
+        destination == Destination.ARCHITECT_SCAN ||
         destination == Destination.PHOTO
 
     Scaffold(
@@ -117,6 +119,10 @@ fun AppShell() {
                 )
                 Destination.PRO -> ProScreen()
                 Destination.ARCHITECT -> ArchitectScreen()
+                Destination.ARCHITECT_SCAN -> ArchitectScanScreen(
+                    onBack = { navigate(Destination.HOME) },
+                    onCaptured = { navigate(Destination.ARCHITECT) }
+                )
                 Destination.SCANNER -> ScannerCaptureScreen()
                 Destination.COUNT -> ObjectCountHome(onSave = ::addRecord)
                 Destination.MORE -> MoreToolsScreen(onOpen = ::navigate)
