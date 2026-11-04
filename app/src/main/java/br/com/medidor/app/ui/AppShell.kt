@@ -68,6 +68,7 @@ fun AppShell() {
         destination == Destination.TANK_CAMERA ||
         destination == Destination.ARCHITECT_SCAN ||
         destination == Destination.ARCHITECT_REVIEW ||
+        destination == Destination.COUNT ||
         destination == Destination.PHOTO
 
     Scaffold(
@@ -132,7 +133,10 @@ fun AppShell() {
                     onEdit = { navigate(Destination.ARCHITECT) },
                     onScan = { navigate(Destination.ARCHITECT_SCAN) }
                 )
-                Destination.COUNT -> ObjectCountHome(onSave = ::addRecord)
+                Destination.COUNT -> ObjectCountHome(
+                    onSave = ::addRecord,
+                    onBack = { navigate(Destination.HOME) }
+                )
                 Destination.MORE -> MoreToolsScreen(onOpen = ::navigate)
             }
         }
