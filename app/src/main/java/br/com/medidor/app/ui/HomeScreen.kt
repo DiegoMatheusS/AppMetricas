@@ -103,7 +103,7 @@ fun HomeScreen(
                 HomeToolCard(
                     title = "Arquiteto", subtitle = "Da planta ao 3D",
                     symbol = "◇", modifier = Modifier.weight(1f),
-                    onClick = { onOpen(Destination.ARCHITECT) }
+                    onClick = { onOpen(Destination.ARCHITECT_SCAN) }
                 )
             }
             Spacer(Modifier.height(27.dp))
@@ -216,7 +216,7 @@ fun MoreToolsScreen(onOpen: (Destination) -> Unit) {
             color = HomeInk)
         listOf(
             Destination.RULER, Destination.AREA, Destination.TANK_CAMERA,
-            Destination.TANK, Destination.BOX, Destination.ARCHITECT,
+            Destination.TANK, Destination.BOX, Destination.ARCHITECT_SCAN, Destination.ARCHITECT,
             Destination.SCANNER, Destination.COUNT, Destination.HISTORY,
             Destination.PRO
         ).forEach { destination ->
