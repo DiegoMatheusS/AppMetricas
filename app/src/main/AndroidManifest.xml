@@ -16,6 +16,10 @@
             android:name=".ui.ArchitectArActivity"
             android:exported="false" />
         <activity
+            android:name=".ui.ArMeasurementActivity"
+            android:configChanges="orientation|screenSize"
+            android:exported="false" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="unspecified">

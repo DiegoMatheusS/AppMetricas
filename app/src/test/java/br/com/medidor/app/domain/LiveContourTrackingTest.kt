@@ -37,4 +37,22 @@ class LiveContourTrackingTest {
         assertNull(LiveContourTracking.check(contour(50,50),null).result)
         assertNotNull(LiveContourTracking.check(null,contour(50,50)).result)
     }
+    @Test fun automaticTrackingConfirmsAcrossFramesAndRecoversAfterBriefLoss() {
+        val tracker = LiveContourStabilizer()
+        val first = contour(55, 40)
+        val nearby = contour(57, 42)
+        val distant = contour(108, 69)
+        val miss = LiveContourState(null, "Sem contorno")
+
+        assertNull(tracker.update(LiveContourState(first, ""), automatic = true).result)
+        assertNull(tracker.update(LiveContourState(distant, ""), automatic = true).result)
+        assertNull(tracker.update(LiveContourState(first, ""), automatic = true).result)
+        assertEquals(nearby, tracker.update(LiveContourState(nearby, ""), automatic = true).result)
+        assertNull(tracker.update(miss, automatic = true).result)
+        assertEquals(nearby, tracker.previous)
+        assertEquals(first, tracker.update(LiveContourState(first, ""), automatic = true).result)
+        repeat(3) { tracker.update(miss, automatic = true) }
+        assertNull(tracker.previous)
+        assertNull(tracker.update(LiveContourState(distant, ""), automatic = true).result)
+    }
 }

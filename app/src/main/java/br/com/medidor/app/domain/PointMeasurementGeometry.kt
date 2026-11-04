@@ -12,14 +12,7 @@ object PointMeasurementGeometry {
     ): Double? {
         if (imageWidth <= 0 || imageHeight <= 0 || corners.size !in 3..12) return null
         val pixelPoints = corners.map { Pair(it.x.toDouble() * imageWidth, it.y.toDouble() * imageHeight) }
-        if (!simplePolygon(pixelPoints)) return null
-        var twice = 0.0
-        for (i in pixelPoints.indices) {
-            val a = pixelPoints[i]
-            val b = pixelPoints[(i + 1) % pixelPoints.size]
-            twice += a.first * b.second - b.first * a.second
-        }
-        return (abs(twice) / 2.0).takeIf { it.isFinite() && it >= 1.0 }
+        return polygonArea(pixelPoints)?.takeIf { it >= 1.0 }
     }
 
     fun areaSquareMillimeters(
@@ -33,6 +26,22 @@ object PointMeasurementGeometry {
         val mmPerPixel = referenceMillimeters / referencePixels
         return (polygonAreaPixels2 * mmPerPixel * mmPerPixel)
             .takeIf { it.isFinite() }
+    }
+
+    /** Area in m² from the local X/Z coordinates of points on a tracked plane. */
+    fun polygonAreaSquareMeters(corners: List<Pair<Double, Double>>): Double? =
+        polygonArea(corners)?.takeIf { it >= .0001 }
+
+    private fun polygonArea(corners: List<Pair<Double, Double>>): Double? {
+        if (corners.size !in 3..12 || corners.any { !it.first.isFinite() || !it.second.isFinite() } ||
+            !simplePolygon(corners)) return null
+        var twice = 0.0
+        for (i in corners.indices) {
+            val a = corners[i]
+            val b = corners[(i + 1) % corners.size]
+            twice += a.first * b.second - b.first * a.second
+        }
+        return (abs(twice) / 2.0).takeIf { it.isFinite() }
     }
 
     private fun simplePolygon(vertices: List<Pair<Double, Double>>): Boolean {

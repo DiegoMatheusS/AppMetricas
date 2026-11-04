@@ -39,10 +39,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -86,6 +88,27 @@ fun CameraMeasurementScreen(
     onSwitchTool: (LiveMeasureTool) -> Unit = {}
 ) {
     val context = LocalContext.current
+    var arLaunchRequested by remember { mutableStateOf(false) }
+    var arOpen by rememberSaveable { mutableStateOf(false) }
+    val arLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        arOpen = false
+    }
+    fun openAr() {
+        if (liveTool == LiveMeasureTool.TANK) {
+            onManual()
+        } else {
+            arOpen = true
+            arLaunchRequested = true
+        }
+    }
+    LaunchedEffect(arLaunchRequested) {
+        if (arLaunchRequested) {
+            arLaunchRequested = false
+            arLauncher.launch(ArMeasurementActivity.intent(context, area = liveTool == LiveMeasureTool.AREA))
+        }
+    }
+    // Remove the CameraX preview before the ARCore activity opens the camera.
+    if (arOpen) return
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED)
@@ -135,6 +158,7 @@ fun CameraMeasurementScreen(
             tool = liveTool,
             onBack = onBack,
             onManual = onManual,
+            onAr = ::openAr,
             onSwitchTool = onSwitchTool
         )
         return
@@ -181,6 +205,7 @@ fun CameraMeasurementScreen(
                         tool = liveTool,
                         onBack = onBack,
                         onManual = onManual,
+                        onAr = ::openAr,
                         onSwitchTool = onSwitchTool
                     )
                 } else {
@@ -196,6 +221,9 @@ fun CameraMeasurementScreen(
                     )
                 }
             } else {
+                OutlinedButton(onClick = ::openAr) {
+                    Text(if (liveTool == LiveMeasureTool.TANK) "Medir tanque em AR" else "Medir em AR")
+                }
                 Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {
                     Text("Permitir câmera")
                 }
