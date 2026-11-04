@@ -4,7 +4,8 @@ import kotlin.math.abs
 
 data class CountRegion(
     val left: Int, val top: Int, val right: Int, val bottom: Int, val area: Int,
-    val outline: List<ContourPixel> = emptyList()
+    val outline: List<ContourPixel> = emptyList(),
+    val meanRed: Int = -1, val meanGreen: Int = -1, val meanBlue: Int = -1
 )
 
 /**
@@ -62,9 +63,14 @@ object LiveObjectCounter {
             if (!mask[start] || seen[start]) continue
             var head = 0; var tail = 1; queue[0] = start; seen[start] = true
             var minX = width; var minY = height; var maxX = 0; var maxY = 0
+            var redSum = 0L; var greenSum = 0L; var blueSum = 0L
             while (head < tail) {
                 val index = queue[head++]
                 val x = index % width; val y = index / width
+                val pixel = pixels[index]
+                redSum += (pixel ushr 16) and 255
+                greenSum += (pixel ushr 8) and 255
+                blueSum += pixel and 255
                 minX = minOf(minX, x); maxX = maxOf(maxX, x)
                 minY = minOf(minY, y); maxY = maxOf(maxY, y)
                 fun visit(i: Int) {
@@ -92,7 +98,9 @@ object LiveObjectCounter {
                     if (outline.size < 1600) outline.add(ContourPixel(x, y))
                 }
             }
-            regions.add(CountRegion(minX,minY,maxX,maxY,area,outline))
+            regions.add(CountRegion(minX,minY,maxX,maxY,area,outline,
+                (redSum / area).toInt(), (greenSum / area).toInt(),
+                (blueSum / area).toInt()))
         }
         return regions.sortedByDescending { it.area }.take(100)
     }
