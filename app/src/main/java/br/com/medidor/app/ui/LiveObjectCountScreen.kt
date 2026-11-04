@@ -70,7 +70,7 @@ private data class CountFrame(
  * This is visual similarity, NOT a semantic class detector.
  */
 @Composable
-fun LiveObjectCountScreen(onSave: (String, String) -> Unit = {}) {
+fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val owner = context as? ComponentActivity
     val ink = Color(0xFF14251F)
