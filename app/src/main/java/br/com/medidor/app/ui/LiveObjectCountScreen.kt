@@ -35,6 +35,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +95,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = {}) {
     val target = remember { AtomicReference<PieceAppearance?>(null) }
     val generation = remember { AtomicInteger(0) }
     val threshold = remember { AtomicInteger(45) }
+    // Avoid cancelling a finger gesture on every incoming camera frame.
+    val latestFrame by rememberUpdatedState(result)
     val preview = remember(context) {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -243,9 +246,9 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = {}) {
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             AndroidView(factory = { preview }, modifier = Modifier.fillMaxSize())
             Canvas(
-                Modifier.fillMaxSize().pointerInput(result, reference) {
+                Modifier.fillMaxSize().pointerInput(Unit) {
                     detectTapGestures { position ->
-                        val frame = result ?: return@detectTapGestures
+                        val frame = latestFrame ?: return@detectTapGestures
                         if (size.width <= 0 || size.height <= 0) return@detectTapGestures
                         val x = (position.x * frame.width / size.width).toInt()
                             .coerceIn(0, frame.width - 1)
