@@ -3,6 +3,8 @@ package br.com.medidor.app.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -56,12 +59,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.domain.BrazilianCoin
 import br.com.medidor.app.domain.LengthUnit
 import br.com.medidor.app.domain.NormalizedPoint
 import br.com.medidor.app.domain.PhotoCalibration
 import br.com.medidor.app.domain.PlanarContourSegmentation
+import br.com.medidor.app.domain.PointMeasurementGeometry
 import br.com.medidor.app.domain.PlanarContourResult
 import br.com.medidor.app.domain.ReferenceMarkQuality
 import java.io.File
@@ -93,7 +98,7 @@ fun CameraMeasurementScreen(
     var coin by remember { mutableStateOf(BrazilianCoin.TWENTY_FIVE_CENTS) }
     var mode by remember { mutableStateOf("coin") }
     var manualSize by remember { mutableStateOf("10") }
-    var measureStyle by remember { mutableStateOf("distance") }
+    var measureStyle by remember(liveTool) { mutableStateOf(if (liveTool == LiveMeasureTool.AREA) "area" else "distance") }
     var seed by remember { mutableStateOf<NormalizedPoint?>(null) }
     var tolerance by remember { mutableStateOf(32) }
     var manualUnit by remember { mutableStateOf(LengthUnit.CENTIMETERS) }
@@ -120,7 +125,7 @@ fun CameraMeasurementScreen(
         LiveContourCamera(
             onPhoto = {
                 bitmap = it
-                measureStyle = "contour"
+                measureStyle = if (liveTool == LiveMeasureTool.AREA) "area" else "distance"
                 points.clear()
                 seed = null
                 saved = false
@@ -195,13 +200,22 @@ fun CameraMeasurementScreen(
         } else {
             val photo = bitmap!!
             Text("1. Tipo de medição:", fontWeight = FontWeight.Medium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = measureStyle == "distance", onClick = {
-                    measureStyle = "distance"; points.clear(); seed = null; saved = false
-                }, label = { Text("Distância manual") })
-                FilterChip(selected = measureStyle == "contour", onClick = {
-                    measureStyle = "contour"; points.clear(); seed = null; saved = false
-                }, label = { Text("Contorno por toque") })
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterChip(selected = measureStyle == "distance", onClick = {
+                        measureStyle = "distance"; points.clear(); seed = null; saved = false
+                    }, label = { Text("Régua • 2 pontos") })
+                }
+                item {
+                    FilterChip(selected = measureStyle == "area", onClick = {
+                        measureStyle = "area"; points.clear(); seed = null; saved = false
+                    }, label = { Text("Área • marcar cantos") })
+                }
+                item {
+                    FilterChip(selected = measureStyle == "contour", onClick = {
+                        measureStyle = "contour"; points.clear(); seed = null; saved = false
+                    }, label = { Text("Contorno automático") })
+                }
             }
             Text("2. Referência para a escala:", fontWeight = FontWeight.Medium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -300,10 +314,15 @@ fun CameraMeasurementScreen(
                     Modifier.fillMaxSize().pointerInput(photo, measureStyle) {
                         detectTapGestures { touch ->
                             val mapped = photoPointFromTouch(touch, size, photo.width, photo.height)
-                            if (mapped != null && points.size < 4) {
+                            val limit = when (measureStyle) {
+                                "contour" -> 2
+                                "area" -> 14 // 2 reference points + 12 corners
+                                else -> 4
+                            }
+                            if (mapped != null) {
                                 if (measureStyle == "contour" && points.size >= 2) {
                                     seed = mapped
-                                } else if (points.size < (if (measureStyle == "contour") 2 else 4)) {
+                                } else if (points.size < limit) {
                                     points.add(mapped)
                                     selectedPointIndex = points.lastIndex
                                 }
@@ -366,7 +385,11 @@ fun CameraMeasurementScreen(
                         FilterChip(
                             selected = selectedPointIndex == index,
                             onClick = { selectedPointIndex = index },
-                            label = { Text(if (index < 2) "Referência ${index + 1}" else "Medida ${index - 1}") }
+                            label = {
+                                Text(if (index < 2) "Referência ${index + 1}"
+                                    else if (measureStyle == "area") "Canto ${index - 1}"
+                                    else "Medida ${index - 1}")
+                            }
                         )
                     }
                 }
@@ -396,6 +419,14 @@ fun CameraMeasurementScreen(
                 points.size == 1 -> "Marque o segundo ponto da referência."
                 measureStyle == "contour" && seed == null -> "Toque dentro do objeto para tentar detectar o contorno."
                 measureStyle == "contour" -> "Confira o contorno estimado e as dimensões."
+                measureStyle == "area" && points.size == 2 ->
+                    "Marque o primeiro canto da área, mantendo tudo no mesmo plano."
+                measureStyle == "area" && points.size < 5 ->
+                    "Marque pelo menos 3 cantos na ordem, sem cruzar as linhas."
+                measureStyle == "area" && points.size < 14 ->
+                    "Área fechada automaticamente. Continue marcando cantos ou salve."
+                measureStyle == "area" ->
+                    "Limite de 12 cantos. Confira o polígono."
                 points.size == 2 -> "Toque no início da distância."
                 points.size == 3 -> "Toque no fim da distância."
                 else -> "Medição concluída. Confira os pontos."
