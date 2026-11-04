@@ -13,12 +13,16 @@ import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -44,6 +49,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.domain.LiveContourTracking
@@ -77,7 +84,11 @@ private data class ContourOverlay(
 @Composable
 internal fun LiveContourCamera(
     onPhoto: (Bitmap) -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    tool: LiveMeasureTool = LiveMeasureTool.RULER,
+    onBack: () -> Unit = {},
+    onManual: () -> Unit = {},
+    onSwitchTool: (LiveMeasureTool) -> Unit = {}
 ) {
     val context = LocalContext.current
     val owner = context as? ComponentActivity
@@ -296,7 +307,7 @@ internal fun LiveContourCamera(
                 }
                 val frame = overlay ?: return@Canvas
                 val c = frame.contour ?: return@Canvas
-                val color = Color(0xFF44E8B5)
+                val color = Color(0xFFC0F565)
                 val top = size.height*c.minY.toFloat()/c.height
                 val bottom = size.height*(c.maxY+1f)/c.height
                 val left = size.width*c.minX.toFloat()/c.width
@@ -312,21 +323,143 @@ internal fun LiveContourCamera(
                 }
             }
         }
-        TextButton(
-            onClick = { menuOpen = true },
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+        val ink = Color(0xFF14251F)
+        val lime = Color(0xFFC0F565)
+        Column(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("⌃  Puxe para abrir controles", color = Color.White)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = onBack,
+                    modifier = Modifier.background(ink.copy(alpha = 0.91f),
+                        RoundedCornerShape(60.dp))
+                ) { Text("‹", fontSize = 28.sp, color = Color.White) }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (tool == LiveMeasureTool.TANK) "Tanques" else "Régua e área",
+                        color = Color.White, fontWeight = FontWeight.Medium,
+                        fontSize = 17.sp
+                    )
+                    Text(
+                        if (tool == LiveMeasureTool.TANK) "CONTORNO AO VIVO"
+                        else "MEDIÇÃO PELA CÂMERA",
+                        color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp
+                    )
+                }
+                TextButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.background(ink.copy(alpha = 0.91f),
+                        RoundedCornerShape(60.dp))
+                ) { Text("•••", fontSize = 16.sp, color = Color.White) }
+            }
+            Row(
+                Modifier.fillMaxWidth().background(ink.copy(alpha = 0.96f),
+                    RoundedCornerShape(35.dp)).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val labels = if (tool == LiveMeasureTool.TANK)
+                    listOf("Câmera", "Manual")
+                else listOf("Régua", "Área")
+                labels.forEachIndexed { index, label ->
+                    val selectedTab = if (tool == LiveMeasureTool.TANK) index == 0
+                        else (tool == LiveMeasureTool.RULER && index == 0) ||
+                            (tool == LiveMeasureTool.AREA && index == 1)
+                    Box(
+                        Modifier.weight(1f)
+                            .background(if (selectedTab) lime else Color.Transparent,
+                                RoundedCornerShape(28.dp))
+                            .clickable {
+                                if (tool == LiveMeasureTool.TANK) {
+                                    if (index == 1) onManual()
+                                } else {
+                                    onSwitchTool(if (index == 0) LiveMeasureTool.RULER
+                                        else LiveMeasureTool.AREA)
+                                }
+                            }.padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(label, fontSize = 13.sp,
+                            color = if (selectedTab) ink else Color.White,
+                            fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    if (overlay?.contour != null) "✓ Contorno encontrado"
+                    else "◉ Analisando contorno",
+                    color = Color.White, fontSize = 12.sp,
+                    modifier = Modifier.background(ink.copy(alpha = 0.93f),
+                        RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 7.dp)
+                )
+                TextButton(onClick = { menuOpen = true }) {
+                    Text("⚙ Ajustar", color = lime, fontSize = 12.sp)
+                }
+            }
         }
-        Column(Modifier.align(Alignment.BottomCenter).padding(12.dp)) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .background(ink.copy(alpha = 0.98f),
+                    RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Text(
-                overlay?.contour?.let {
-                    "Contorno detectado: largura ${(it.widthFraction*100).toInt()}% • altura ${(it.heightFraction*100).toInt()}% do quadro"
-                } ?: (overlay?.message ?: "Procurando contornos… Toque no objeto para corrigir."),
-                color = Color.White, style = MaterialTheme.typography.bodyMedium
+                when (tool) {
+                    LiveMeasureTool.RULER -> "Dois pontos. Uma medida."
+                    LiveMeasureTool.AREA -> "Contorne a área"
+                    LiveMeasureTool.TANK -> "Contorne o tanque"
+                },
+                color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp
             )
-            Text("Valores relativos à imagem; centímetros exigem calibração.",
-                color = Color.White, style = MaterialTheme.typography.bodySmall)
+            Text(
+                when (tool) {
+                    LiveMeasureTool.RULER ->
+                        "Toque no objeto para detectar o contorno. Para obter centímetros, capture e calibre com uma referência conhecida."
+                    LiveMeasureTool.AREA ->
+                        "Aponte para a superfície e analise seu contorno. A área real exige escala e pontos do mesmo plano."
+                    LiveMeasureTool.TANK ->
+                        "Aponte e mova-se ao redor do tanque para inspecionar seu contorno. O deslocamento ainda não produz medidas 3D."
+                },
+                color = Color.White.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.bodySmall
+            )
+            overlay?.contour?.let {
+                Text(
+                    "Região na imagem: ${(it.widthFraction*100).toInt()}% de largura × " +
+                        "${(it.heightFraction*100).toInt()}% de altura",
+                    color = lime, fontSize = 12.sp
+                )
+            }
+            Button(
+                onClick = { if (tool == LiveMeasureTool.TANK) onManual() else menuOpen = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = lime, contentColor = ink
+                ),
+                shape = RoundedCornerShape(13.dp)
+            ) {
+                Text(
+                    if (tool == LiveMeasureTool.TANK) "Informar dimensões do tanque"
+                    else "Capturar e calibrar medida",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                if (tool == LiveMeasureTool.TANK)
+                    "A capacidade precisa do diâmetro e da altura medidos. Nenhuma medida é inventada."
+                else "Sem referência calibrada não há resultado em metros ou m².",
+                fontSize = 10.sp, color = Color.White.copy(alpha = 0.65f)
+            )
         }
         if (menuOpen) {
             ModalBottomSheet(onDismissRequest = { menuOpen = false }) {
@@ -421,7 +554,7 @@ internal fun LiveContourCamera(
                 }
             }
         }
-        Button(enabled = capture != null,onClick = {
+        if (tool != LiveMeasureTool.TANK) Button(enabled = capture != null,onClick = {
             val camera = capture ?: return@Button
             val file = File(context.cacheDir,
                 "contorno_${SystemClock.elapsedRealtimeNanos()}.jpg")
@@ -442,12 +575,15 @@ internal fun LiveContourCamera(
                 }
             )
         }) { Text("Capturar foto para medir em cm") }
-        Text("A seleção ao vivo NÃO mede distância, profundidade nem identifica " +
-            "automaticamente o objeto. Para estimar centímetros, capture uma foto " +
-            "e calibre uma referência física no mesmo plano. O contorno da câmera " +
-            "é apenas uma aproximação visual, mesmo quando a estabilidade aparece alta.",
+        Text(
+            if (tool == LiveMeasureTool.TANK)
+                "A câmera identifica contornos aproximados, mas ainda não reconstrói a " +
+                    "geometria ao caminhar. Para calcular a capacidade, use dimensões medidas."
+            else "Contorno ao vivo não calcula profundidade ou escala real. Capture " +
+                "e calibre uma referência no mesmo plano antes de registrar uma medida.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
                 }
             }
         }
