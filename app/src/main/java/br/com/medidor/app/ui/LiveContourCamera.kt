@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.domain.LiveContourTracking
+import br.com.medidor.app.domain.LiveContourCandidate
 import br.com.medidor.app.domain.LiveViewportMapping
 import br.com.medidor.app.domain.ContourNormalizedArea
 import br.com.medidor.app.domain.ContourVisualAssessment
@@ -96,7 +97,10 @@ internal fun LiveContourCamera(
     val latestError by rememberUpdatedState(onError)
     val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
     val worker = remember { Executors.newSingleThreadExecutor() }
-    val selected = remember { AtomicReference<NormalizedPoint?>(NormalizedPoint(0.5f, 0.5f)) }
+    val selected = remember { AtomicReference<NormalizedPoint?>(null) }
+    val automatic = remember { AtomicBoolean(true) }
+    var autoSearch by remember { mutableStateOf(true) }
+    var tapMarker by remember { mutableStateOf<NormalizedPoint?>(null) }
     val previous = remember { AtomicReference<PlanarContourResult?>(null) }
     val chosenArea = remember { AtomicReference<ContourNormalizedArea?>(null) }
     var areaMode by remember { mutableStateOf(false) }
@@ -147,36 +151,26 @@ internal fun LiveContourCamera(
                                 val point = selected.get()
                                 val before = previous.get()
                                 val bounds = chosenArea.get()?.pixels(frame.width,frame.height)
-                                val detected = if (point != null)
-                                    PlanarContourSegmentation.segment(
-                                        frame.pixels,frame.width,frame.height,
-                                        (point.x * (frame.width-1)).toInt()
-                                            .coerceIn(0,frame.width-1),
-                                        (point.y * (frame.height-1)).toInt()
-                                            .coerceIn(0,frame.height-1),
-                                        threshold.get(),bounds
-                                    ) else null
-                                val checked = if (point == null) null else
-                                    LiveContourTracking.check(before,detected)
+                                val checked = LiveContourCandidate.find(
+                                    frame.pixels, frame.width, frame.height,
+                                    if (automatic.get()) null else point,
+                                    threshold.get(), bounds, before
+                                )
                                 if (generation == selectionGeneration.get()) {
                                     val nextContour = checked?.result
-                                    if (point != null && nextContour == null) {
-                                        // Do not keep searching the old location
-                                        // after a failed or unstable segmentation.
-                                        selected.set(null)
-                                    } else if (point != null && before != null &&
-                                        nextContour != null) {
+                                    if (point != null && before != null &&
+                                        nextContour != null && !automatic.get()) {
                                         LiveContourTracking.followSeed(before,nextContour,point)
                                             ?.let { selected.set(it) }
                                     }
+                                    // Keep trying the selected point on later frames
+                                    // instead of silently giving up on the first failure.
                                     previous.set(nextContour)
                                     val visual = nextContour?.let {
                                         ContourVisualQuality.assess(it,before,bounds)
                                     }
                                     val output = ContourOverlay(frame.width,frame.height,
-                                        nextContour,checked?.label
-                                            ?: "Toque no objeto para selecionar o contorno.",
-                                        visual)
+                                        nextContour,checked.label, visual)
                                     mainExecutor.execute {
                                         if (!disposed.get() &&
                                             generation == selectionGeneration.get()) {
@@ -191,7 +185,6 @@ internal fun LiveContourCamera(
                             if (!disposed.get()) {
                                 overlay = ContourOverlay(1,1,null,
                                     "Falha no quadro; toque novamente para selecionar.")
-                                selected.set(null)
                                 previous.set(null)
                             }
                         }
@@ -276,24 +269,29 @@ internal fun LiveContourCamera(
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
-            Canvas(Modifier.fillMaxSize().pointerInput(areaMode,overlay?.width,overlay?.height) {
+            Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
                 detectTapGestures { touch ->
                     val n = LiveViewportMapping.point(touch.x,touch.y,
                         size.width.toFloat(),size.height.toFloat())
                         ?.let { NormalizedPoint(it.first,it.second) }
                     if (n != null) {
                         selectionGeneration.incrementAndGet()
-                        selected.set(null)
                         previous.set(null)
                         val message = if (!areaMode) {
+                            automatic.set(false)
+                            autoSearch = false
                             selected.set(n)
-                            "Analisando a região selecionada…"
+                            tapMarker = n
+                            "Buscando contorno no ponto selecionado…"
                         } else {
                             val region = chosenArea.get()
                             when {
                                 region != null && region.contains(n) -> {
+                                    automatic.set(false)
+                                    autoSearch = false
                                     selected.set(n)
-                                    "Analisando a região dentro da área delimitada…"
+                                    tapMarker = n
+                                    "Buscando contorno dentro da área delimitada…"
                                 }
                                 region != null -> "Toque dentro da área delimitada ou redefina-a."
                                 firstCorner == null -> {
@@ -335,6 +333,11 @@ internal fun LiveContourCamera(
                 firstCorner?.let { corner ->
                     drawCircle(Color(0xFFFFBF66),7.dp.toPx(),
                         Offset(size.width*corner.x,size.height*corner.y))
+                }
+                tapMarker?.let { marker ->
+                    val pos = Offset(size.width * marker.x, size.height * marker.y)
+                    drawCircle(Color(0xFFFFBF66), 10.dp.toPx(), pos)
+                    drawCircle(Color(0xFF14251F), 5.dp.toPx(), pos)
                 }
                 val frame = overlay ?: return@Canvas
                 val c = frame.contour ?: return@Canvas
@@ -426,8 +429,11 @@ internal fun LiveContourCamera(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    if (overlay?.contour != null) "✓ Contorno encontrado"
-                    else "◉ Analisando contorno",
+                    when {
+                        overlay?.contour != null -> "✓ Contorno visual detectado"
+                        overlay == null -> "◉ Iniciando análise..."
+                        else -> "Sem contorno — veja orientação"
+                    },
                     color = Color.White, fontSize = 12.sp,
                     modifier = Modifier.background(ink.copy(alpha = 0.93f),
                         RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 7.dp)
@@ -464,10 +470,16 @@ internal fun LiveContourCamera(
                 color = Color.White.copy(alpha = 0.75f),
                 style = MaterialTheme.typography.bodySmall
             )
+            Text(
+                overlay?.message ?: "Preparando análise pela câmera...",
+                color = if (overlay?.contour != null) lime
+                    else Color.White.copy(alpha = .8f),
+                fontSize = 11.sp
+            )
             overlay?.contour?.let {
                 Text(
-                    "Região na imagem: ${(it.widthFraction*100).toInt()}% de largura × " +
-                        "${(it.heightFraction*100).toInt()}% de altura",
+                    "Região: ${(it.widthFraction*100).toInt()}% da largura × " +
+                        "${(it.heightFraction*100).toInt()}% da altura do quadro",
                     color = lime, fontSize = 12.sp
                 )
             }
@@ -505,9 +517,21 @@ internal fun LiveContourCamera(
 
         Text("Contorno ao vivo — experimental",
             style = MaterialTheme.typography.titleMedium)
-        Text("Selecione diretamente o objeto ou delimite uma área para reduzir " +
-            "a interferência de fundos com cores parecidas.",
+        Text("A busca automática procura objetos isolados. Se não encontrar, " +
+            "toque na parte central do objeto ou delimite uma região para ajudar.",
             style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(
+            enabled = !autoSearch,
+            onClick = {
+                automatic.set(true)
+                autoSearch = true
+                selected.set(null)
+                tapMarker = null
+                previous.set(null)
+                selectionGeneration.incrementAndGet()
+                overlay = ContourOverlay(1,1,null,"Buscando objetos automaticamente...")
+            }
+        ) { Text("Buscar contorno automaticamente") }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = !areaMode,
@@ -516,11 +540,14 @@ internal fun LiveContourCamera(
                     chosenArea.set(null)
                     drawnArea = null
                     firstCorner = null
+                    automatic.set(true)
+                    autoSearch = true
                     selected.set(null)
+                    tapMarker = null
                     previous.set(null)
                     selectionGeneration.incrementAndGet()
                     overlay = overlay?.copy(contour=null,assessment=null,
-                        message="Modo livre: toque no objeto.")
+                        message="Buscando contornos automaticamente.")
                 },
                 label = { Text("Toque livre") }
             )
@@ -531,11 +558,14 @@ internal fun LiveContourCamera(
                     chosenArea.set(null)
                     drawnArea = null
                     firstCorner = null
+                    automatic.set(true)
+                    autoSearch = true
                     selected.set(null)
+                    tapMarker = null
                     previous.set(null)
                     selectionGeneration.incrementAndGet()
                     overlay = overlay?.copy(contour=null,assessment=null,
-                        message="Marque dois cantos e depois toque dentro do objeto.")
+                        message="Delimite a área ou aguarde a análise automática.")
                 },
                 label = { Text("Delimitar área") }
             )
