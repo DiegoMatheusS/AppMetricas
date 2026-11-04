@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
@@ -69,6 +70,8 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
     var capture by remember { mutableStateOf<ImageCapture?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var confirmOverwrite by remember { mutableStateOf(false) }
+    var allowOverwrite by remember { mutableStateOf(false) }
     val view = remember(context) {
         PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
     }
@@ -106,6 +109,28 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
         }
     }
 
+    if (confirmOverwrite) {
+        AlertDialog(
+            onDismissRequest = { confirmOverwrite = false },
+            title = { Text("Substituir planta existente?") },
+            text = {
+                Text("O pavimento atual já contém uma imagem ou paredes. A nova " +
+                    "captura apagará as marcações e escala existentes. " +
+                    "Ao confirmar, toque novamente em Escanear planta.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    allowOverwrite = true
+                    confirmOverwrite = false
+                }) { Text("Permitir substituir") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmOverwrite = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
     Box(Modifier.fillMaxSize().background(ink)) {
         if (granted) {
             AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
@@ -170,6 +195,16 @@ fun ArchitectScanScreen(onBack: () -> Unit, onCaptured: () -> Unit) {
                 Button(
                     enabled = capture != null && !busy,
                     onClick = {
+                        val existing = ArchitectPlanStore(context.applicationContext).load()
+                        val currentFloor = existing.floors[existing.selectedFloor]
+                        if (!allowOverwrite &&
+                            (currentFloor.imageFile != null ||
+                                currentFloor.walls.isNotEmpty() ||
+                                currentFloor.openings.isNotEmpty())
+                        ) {
+                            confirmOverwrite = true
+                            return@Button
+                        }
                         val camera = capture ?: return@Button
                         busy = true
                         val file = File(context.cacheDir,
