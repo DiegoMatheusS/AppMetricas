@@ -351,6 +351,7 @@ private fun BoxMeasurementGuide() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Como medir a caixa", style = MaterialTheme.typography.titleSmall)
+            DimensionDiagram()
             Text("Comprimento: de uma extremidade à outra da base.")
             Text("Largura: outra dimensão horizontal da base.")
             Text("Altura: da base até o topo, na vertical.")
@@ -366,6 +367,7 @@ private fun TankMeasurementGuide(shape: TankShape) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Entenda as medidas", style = MaterialTheme.typography.titleSmall)
+            DimensionDiagram(shape)
             Text("Diâmetro: distância entre duas bordas opostas, passando pelo centro da seção circular.")
             when (shape) {
                 TankShape.VERTICAL -> Text("Altura: distância vertical entre o fundo e o topo interno.")
