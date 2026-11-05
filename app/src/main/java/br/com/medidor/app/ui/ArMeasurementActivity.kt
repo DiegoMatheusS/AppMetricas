@@ -308,7 +308,8 @@ internal class ArMeasurementActivity : ComponentActivity() {
         val measurement = if (areaMode) frame.area?.let(::formatArArea)
             else frame.sides.singleOrNull()?.let(::formatArLength)
         val caption = listOfNotNull(
-            dimension?.let { "${frame.dimensionIndex + 1}/${dimensions.size} • $it" }, measurement
+            dimension?.let { "${frame.dimensionIndex + 1}/${dimensions.size} • $it" },
+            measurement
         ).joinToString(" · ")
         val message = if (saved) "Medição salva neste aparelho." else frame.message
         if (status.text != message) status.text = message
@@ -327,8 +328,8 @@ internal class ArMeasurementActivity : ComponentActivity() {
             manual.setTextColor(if (frame.automatic) Color.WHITE else ink)
         }
         confirm.isEnabled = !saved && measurement != null
-        undo.isEnabled = frame.points.isNotEmpty()
-        clear.isEnabled = frame.points.isNotEmpty()
+        undo.isEnabled = frame.points.isNotEmpty() || (tankShape != null && frame.dimensionIndex > 0)
+        clear.isEnabled = frame.points.isNotEmpty() || (tankShape != null && frame.dimensionIndex > 0)
     }
 
     private fun label(size: Float) = TextView(this).apply {
