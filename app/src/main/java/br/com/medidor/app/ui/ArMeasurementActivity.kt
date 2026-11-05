@@ -137,7 +137,9 @@ internal class ArMeasurementActivity : ComponentActivity() {
             addView(result)
             if (tankShape != null) {
                 addView(label(13f).apply {
-                    text = "Enquadre o tanque inteiro e alinhe a câmera. Confira a medida encontrada antes de confirmar."
+                    text = "Caminhe devagar em volta do tanque para a câmera estimar a profundidade. " +
+                        "Confirme o diâmetro e depois a altura/comprimento. " +
+                        "O volume útil exige dimensões INTERNAS verificadas."
                 })
             }
             confirm = Button(context).apply {
@@ -168,7 +170,10 @@ internal class ArMeasurementActivity : ComponentActivity() {
                 }
                 clear = addAction("Refazer") {
                     saved = false
-                    surface.queueEvent { renderer.clear() }
+                    surface.queueEvent {
+                        if (tankShape != null) renderer.restartTankMeasurement()
+                        else renderer.clear()
+                    }
                 }
                 undo.isEnabled = false
                 clear.isEnabled = false
@@ -400,6 +405,20 @@ private class ArMeasurementOverlay(
                 canvas.drawRoundRect(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight,
                     5 * density, 5 * density, backing)
                 canvas.drawText(text, x, y - (label.ascent() + label.descent()) / 2, label)
+            }
+        }
+        if (current.area != null && current.points.filterNotNull().size >= 3) {
+            val points = current.points.filterNotNull()
+            val centerX = points.map { it.x }.average().toFloat()
+            val centerY = points.map { it.y }.average().toFloat()
+            if (centerX in 0f..width.toFloat() && centerY in 0f..height.toFloat()) {
+                val caption = formatArArea(current.area)
+                val hw = label.measureText(caption) / 2 + 10 * density
+                val hh = label.textSize * .8f
+                canvas.drawRoundRect(centerX - hw, centerY - hh,
+                    centerX + hw, centerY + hh, 6 * density, 6 * density, backing)
+                canvas.drawText(caption, centerX,
+                    centerY - (label.ascent() + label.descent()) / 2, label)
             }
         }
         for (point in current.points.filterNotNull()) {
