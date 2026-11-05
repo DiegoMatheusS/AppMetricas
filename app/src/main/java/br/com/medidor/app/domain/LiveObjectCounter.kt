@@ -16,7 +16,8 @@ data class CountRegion(
  * colored objects may still count as a single region.
  */
 object LiveObjectCounter {
-    fun detect(pixels: IntArray, width: Int, height: Int, sensitivity: Int = 45, referenceArea: Double? = null): List<CountRegion> {
+    fun detect(pixels: IntArray, width: Int, height: Int, sensitivity: Int = 45, referenceArea: Double? = null,
+               reference: PieceAppearance? = null): List<CountRegion> {
         require(width in 8..512 && height in 8..512 && pixels.size == width * height)
         require(sensitivity in 15..100)
         val rs = IntArray(256); val gs = IntArray(256); val bs = IntArray(256)
@@ -58,10 +59,16 @@ object LiveObjectCounter {
         }
 
         val components = PieceSegmentation.components(mask, width, height)
-        val regions = components.flatMap { component ->
-            val parts = if (referenceArea != null)
-                PieceSegmentation.split(component, width, height, referenceArea) else listOf(component)
-            parts.mapNotNull { indices -> describe(indices, pixels, width, height) }
+        val described = components.map { it to describe(it, pixels, width, height) }
+        val matchingAreas = if (reference == null) emptyList() else described.mapNotNull { (_, region) ->
+            region?.takeIf { SimilarObjectCounter.matches(reference, it) }?.area?.toDouble()
+        }.sorted()
+        // Learn the current image scale from intact matching pieces before splitting joined regions.
+        val area = matchingAreas.getOrNull(matchingAreas.size / 2) ?: referenceArea ?: reference?.area
+        val regions = described.flatMap { (component, region) ->
+            if (area == null || component.size < area * 1.65) listOfNotNull(region) else
+                PieceSegmentation.split(component, width, height, area)
+                    .mapNotNull { indices -> describe(indices, pixels, width, height) }
         }
 
         return regions.sortedByDescending { it.area }.take(100)

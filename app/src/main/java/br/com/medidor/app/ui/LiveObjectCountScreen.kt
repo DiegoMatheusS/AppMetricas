@@ -154,7 +154,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                                 val regions = LiveObjectCounter.detect(
                                     sampled.pixels,
                                     sampled.width, sampled.height,
-                                    threshold.get(), target.get()?.area
+                                    threshold.get(), reference = target.get()
                                 )
                                 val version = generation.get()
                                 if (version != previousGeneration) {

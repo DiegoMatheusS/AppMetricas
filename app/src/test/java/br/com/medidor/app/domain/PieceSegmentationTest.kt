@@ -21,6 +21,23 @@ class PieceSegmentationTest {
         assertTrue(SimilarObjectCounter.matches(SimilarObjectCounter.appearance(first)!!, rotated))
     }
 
+    @Test fun movingCloserDoesNotSplitOneIntactLongPieceIntoMultiplePieces() {
+        val width = 180
+        val height = 120
+        fun scene(halfWidth: Int, halfHeight: Int): IntArray =
+            IntArray(width * height) { index ->
+                val x = index % width
+                val y = index / width
+                if (x in 90 - halfWidth..90 + halfWidth && y in 60 - halfHeight..60 + halfHeight)
+                    0xFF993322.toInt() else 0xFFFFFFFF.toInt()
+            }
+        val original = LiveObjectCounter.detect(scene(20, 6), width, height).single()
+        val reference = SimilarObjectCounter.appearance(original)!!
+        val closer = LiveObjectCounter.detect(scene(34, 10), width, height, reference = reference)
+        assertEquals(1, closer.size)
+        assertTrue(SimilarObjectCounter.matches(reference, closer.single()))
+    }
+
     @Test fun distanceWatershedSplitsTwoTouchingVisiblePieces() {
         val width = 100
         val height = 80
