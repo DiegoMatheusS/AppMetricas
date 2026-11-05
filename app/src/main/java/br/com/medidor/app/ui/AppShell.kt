@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import br.com.medidor.app.data.LocalHistory
+import br.com.medidor.app.domain.TankCameraCapture
 
 enum class Destination(val label: String) {
     HOME("App Métricas"),
@@ -52,6 +53,7 @@ fun AppShell() {
         ?: Destination.HOME
     val screenState = rememberSaveableStateHolder()
     var records by remember { mutableStateOf(store.load()) }
+    var capturedTank by remember { mutableStateOf<TankCameraCapture?>(null) }
     LaunchedEffect(destination) {
         if (destination == Destination.HISTORY || destination == Destination.HOME) {
             records = store.load()
@@ -115,12 +117,20 @@ fun AppShell() {
                             LiveMeasureTool.AREA -> Destination.AREA
                             LiveMeasureTool.TANK -> Destination.TANK_CAMERA
                         })
+                    },
+                    onTankArResult = { capture ->
+                        capturedTank = capture
+                        navigate(Destination.TANK)
                     }
                 )
                 Destination.BOX -> BoxCalculatorScreen(
                     onSave = ::addRecord, onCamera = { navigate(Destination.AREA) })
                 Destination.TANK -> TankCalculatorScreen(
-                    onSave = ::addRecord, onCamera = { navigate(Destination.TANK_CAMERA) })
+                    onSave = ::addRecord,
+                    onCamera = { navigate(Destination.TANK_CAMERA) },
+                    incomingAr = capturedTank,
+                    onArImported = { capturedTank = null }
+                )
                 Destination.HISTORY -> HistoryScreen(
                     records = records,
                     onDeleteAll = { store.clear(); records = emptyList() },
