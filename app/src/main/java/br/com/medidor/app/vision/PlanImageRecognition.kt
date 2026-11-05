@@ -54,24 +54,10 @@ internal object PlanImageRecognition {
                 val merged = PlanRecognition.mergeStrokes(strokes, tolerance)
                 val walls = mutableListOf<PlanWall>()
                 val openings = mutableListOf<PlanOpening>()
-                val visited = mutableSetOf<Int>()
-                for (index in merged.indices) {
-                    if (index in visited || walls.size >= 300) continue
-                    var segment = merged[index]
-                    val gaps = mutableListOf<Pair<Double, Double>>()
-                    for (otherIndex in merged.indices) {
-                        if (otherIndex == index || otherIndex in visited) continue
-                        val other = merged[otherIndex]
-                        if (other.horizontal != segment.horizontal || abs(other.offset - segment.offset) > tolerance) continue
-                        val axisPixels = if (segment.horizontal) w else h
-                        val gap = (other.start - segment.end) * axisPixels / pixelsPerMeter
-                        if (gap in .55..1.6) {
-                            gaps += segment.end to other.start
-                            visited += otherIndex
-                            segment = segment.copy(end = other.end)
-                        }
-                    }
-                    visited += index
+                val runs = PlanRecognition.wallRuns(merged, tolerance, w / pixelsPerMeter, h / pixelsPerMeter)
+                for (run in runs) {
+                    val segment = run.line
+                    val gaps = run.gaps
                     fun point(axis: Double) = if (segment.horizontal)
                         PlanPoint(axis.coerceIn(0.0, 1.0).toFloat(), segment.offset.coerceIn(0.0, 1.0).toFloat())
                     else PlanPoint(segment.offset.coerceIn(0.0, 1.0).toFloat(), axis.coerceIn(0.0, 1.0).toFloat())

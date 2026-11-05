@@ -4,6 +4,7 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 internal data class PlanLine(val horizontal: Boolean, val offset: Double, val start: Double, val end: Double)
+internal data class PlanWallRun(val line: PlanLine, val gaps: List<Pair<Double, Double>>)
 internal data class PlanRecognitionDraft(val walls: List<PlanWall>, val openings: List<PlanOpening>)
 
 internal object PlanRecognition {
@@ -25,6 +26,43 @@ internal object PlanRecognition {
             }
         }
         return output.take(300)
+    }
+
+    /** Hough strokes can arrive in any order, including the right side before the left side of a door. */
+    fun wallRuns(input: List<PlanLine>, tolerance: Double, horizontalMeters: Double,
+                 verticalMeters: Double): List<PlanWallRun> {
+        val groups = mutableListOf<MutableList<PlanLine>>()
+        for (line in input) {
+            val group = groups.firstOrNull {
+                it.first().horizontal == line.horizontal && abs(it.map { segment -> segment.offset }.average() - line.offset) <= tolerance
+            }
+            if (group == null) groups += mutableListOf(line) else group += line
+        }
+        val result = mutableListOf<PlanWallRun>()
+        for (group in groups) {
+            val ordered = group.sortedBy { it.start }
+            val offset = group.map { it.offset }.average()
+            var current = ordered.first().copy(offset = offset)
+            var gaps = mutableListOf<Pair<Double, Double>>()
+            val meters = if (current.horizontal) horizontalMeters else verticalMeters
+            for (next in ordered.drop(1)) {
+                val gap = next.start - current.end
+                when {
+                    gap <= tolerance -> current = current.copy(end = maxOf(current.end, next.end))
+                    gap * meters in .55..1.6 -> {
+                        gaps += current.end to next.start
+                        current = current.copy(end = next.end)
+                    }
+                    else -> {
+                        result += PlanWallRun(current, gaps.toList())
+                        current = next.copy(offset = offset)
+                        gaps = mutableListOf()
+                    }
+                }
+            }
+            result += PlanWallRun(current, gaps.toList())
+        }
+        return result.take(300)
     }
 
     /** Add reviewed suggestions while retaining existing walls and their opening indices. */

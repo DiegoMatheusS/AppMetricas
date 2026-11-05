@@ -13,6 +13,15 @@ class PlanRecognitionTest {
         assertEquals(.4, merged.first().end, .0001)
     }
 
+    @Test fun joinsTheDoorGapWhenRightStrokeWasDetectedBeforeTheLeftOne() {
+        val input = listOf(PlanLine(true, .84, .55, .9), PlanLine(true, .835, .1, .45))
+        val runs = PlanRecognition.wallRuns(input, .015, 6.0, 5.0)
+        assertEquals(1, runs.size)
+        assertEquals(.1, runs.single().line.start, .0001)
+        assertEquals(.9, runs.single().line.end, .0001)
+        assertEquals(listOf(.45 to .55), runs.single().gaps)
+    }
+
     @Test fun applyingSuggestionsKeepsExistingOpeningsAndHandlesReversedWalls() {
         val first = PlanPoint(.1f, .2f)
         val last = PlanPoint(.9f, .2f)

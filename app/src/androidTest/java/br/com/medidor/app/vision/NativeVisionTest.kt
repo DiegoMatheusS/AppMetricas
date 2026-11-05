@@ -52,9 +52,9 @@ class NativeVisionTest {
             referenceStart = PlanPoint(80f / 600, 80f / 500), referenceEnd = PlanPoint(520f / 600, 80f / 500))
         try {
             val draft = PlanImageRecognition.detect(bitmap, floor)
-            assertTrue(draft.walls.size >= 4)
-            assertTrue(draft.openings.any { it.type == OpeningType.DOOR })
-            assertTrue(draft.openings.any { it.type == OpeningType.WINDOW })
+            assertTrue("Paredes detectadas: ${draft.walls}", draft.walls.size >= 4)
+            assertTrue("Aberturas detectadas: ${draft.openings}", draft.openings.any { it.type == OpeningType.DOOR })
+            assertTrue("Aberturas detectadas: ${draft.openings}", draft.openings.any { it.type == OpeningType.WINDOW })
         } finally { bitmap.recycle() }
     }
 
