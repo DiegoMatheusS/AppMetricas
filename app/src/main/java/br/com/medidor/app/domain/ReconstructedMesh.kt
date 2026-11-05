@@ -9,10 +9,12 @@ data class ReconstructedMesh(
     val vertices: List<Point3d>,
     val triangles: List<MeshTriangle>,
     val registeredPhotos: Int,
-    val suppliedPhotos: Int
+    val suppliedPhotos: Int,
+    val fieldOfViewDegrees: Double = 60.0
 ) {
     fun validate() {
         require(vertices.size in 20..12_000 && triangles.size in 10..30_000) { "Geometria insuficiente para um modelo." }
+        require(fieldOfViewDegrees.isFinite() && fieldOfViewDegrees in 25.0..100.0)
         require(registeredPhotos in 2..20 && suppliedPhotos in registeredPhotos..20)
         require(vertices.all { it.x.isFinite() && it.y.isFinite() && it.z.isFinite() })
         require(triangles.all { it.a in vertices.indices && it.b in vertices.indices && it.c in vertices.indices &&
@@ -27,6 +29,7 @@ data class ReconstructedMesh(
         validate()
         writer.write("# App Metricas - superficie reconstruida de fotografias\n")
         writer.write("# Escala proporcional; calibre uma referencia antes de interpretar unidades fisicas\n")
+        writer.write("# Campo de visao horizontal estimado: $fieldOfViewDegrees graus\n")
         for (point in vertices) writer.write(String.format(Locale.US, "v %.7f %.7f %.7f\n", point.x, point.y, point.z))
         for (triangle in triangles) writer.write("f ${triangle.a + 1} ${triangle.b + 1} ${triangle.c + 1}\n")
         writer.flush()

@@ -71,7 +71,7 @@ internal object PhotoReconstruction {
                 }
             } while (added && views.any { it.pose == null })
             progress("Construindo a superfície 3D…")
-            buildMesh(views, vertices, slots.size).also { it.validate() }
+            buildMesh(views, vertices, slots.size, fieldOfView).also { it.validate() }
         }
     }
 
@@ -247,7 +247,7 @@ internal object PhotoReconstruction {
         else rotation.get(index / 4, index % 4)[0]
     }
 
-    private fun buildMesh(views: List<View>, points: List<Point3d>, supplied: Int): ReconstructedMesh {
+    private fun buildMesh(views: List<View>, points: List<Point3d>, supplied: Int, fieldOfView: Double): ReconstructedMesh {
         val span = maxOf(points.maxOf { it.x } - points.minOf { it.x },
             points.maxOf { it.y } - points.minOf { it.y }, points.maxOf { it.z } - points.minOf { it.z })
         val triangles = linkedMapOf<List<Int>, MeshTriangle>()
@@ -285,6 +285,6 @@ internal object PhotoReconstruction {
             }
         }
         val converted = points.map { Point3d(it.x, it.z, -it.y) }
-        return ReconstructedMesh(converted, triangles.values.toList(), views.count { it.pose != null }, supplied)
+        return ReconstructedMesh(converted, triangles.values.toList(), views.count { it.pose != null }, supplied, fieldOfView)
     }
 }

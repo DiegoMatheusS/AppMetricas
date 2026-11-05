@@ -24,6 +24,8 @@ internal object PlanImageRecognition {
                 Imgproc.threshold(gray, binary, 0.0, 255.0, Imgproc.THRESH_BINARY_INV or Imgproc.THRESH_OTSU)
                 val w = gray.cols()
                 val h = gray.rows()
+                val ink = ByteArray(w * h)
+                binary.get(0, 0, ink)
                 val horizontal = scope.own(Mat())
                 val vertical = scope.own(Mat())
                 val hk = scope.own(Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(maxOf(9.0, w * .025), 1.0)))
@@ -87,12 +89,46 @@ internal object PlanImageRecognition {
                         for (y in maxOf(0, py - band)..minOf(h - 1, py + band))
                             for (x in maxOf(0, px - band)..minOf(w - 1, px + band)) {
                                 total++
-                                if (binary.get(y, x)[0] > 0) dark++
+                                if (ink[y * w + x].toInt() != 0) dark++
                             }
                         val window = dark.toDouble() / total > .18
                         openings += PlanOpening(wallIndex, if (window) OpeningType.WINDOW else OpeningType.DOOR,
                             (center - segment.start) / (segment.end - segment.start), widthMeters,
                             if (window) .9 else 0.0, if (window) 1.1 else 2.1)
+                    }
+                }
+                // A short, thin passage inside an otherwise thick stroke is a window candidate.
+                // Keep it reviewable because drawing conventions differ between floor plans.
+                walls.forEachIndexed { index, wall ->
+                    val horizontalWall = abs(wall.start.y - wall.end.y) < .01
+                    val start = ((if (horizontalWall) wall.start.x * w else wall.start.y * h)).toInt()
+                    val end = ((if (horizontalWall) wall.end.x * w else wall.end.y * h)).toInt()
+                    val normal = ((if (horizontalWall) wall.start.y * h else wall.start.x * w)).toInt()
+                    val band = (.15 * pixelsPerMeter).toInt().coerceIn(3, 18)
+                    val profile = (start..end).map { axis ->
+                        (-band..band).count { delta ->
+                            val x = if (horizontalWall) axis else normal + delta
+                            val y = if (horizontalWall) normal + delta else axis
+                            x in 0 until w && y in 0 until h && ink[y * w + x].toInt() != 0
+                        }
+                    }
+                    val positive = profile.filter { it > 0 }.sorted()
+                    val typical = positive.getOrNull(positive.size * 3 / 4) ?: return@forEachIndexed
+                    if (typical < 5) return@forEachIndexed
+                    var run: Int? = null
+                    for (position in profile.indices) {
+                        val thin = profile[position] in 1..(typical * .6).toInt()
+                        if (thin && run == null) run = position
+                        if (!thin && run != null) {
+                            val first = run
+                            run = null
+                            val widthMeters = (position - first) / pixelsPerMeter
+                            if (first > 2 && position < profile.lastIndex - 2 && widthMeters in .4..3.0) {
+                                openings += PlanOpening(index, OpeningType.WINDOW,
+                                    (first + position) / (2.0 * profile.lastIndex), widthMeters,
+                                    .9, 1.1)
+                            }
+                        }
                     }
                 }
                 PlanRecognitionDraft(walls, openings)

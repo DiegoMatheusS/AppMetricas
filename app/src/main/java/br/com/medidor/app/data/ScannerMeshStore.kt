@@ -33,7 +33,7 @@ internal class ScannerMeshStore(context: Context) {
                     List(triangles.length()) { i -> triangles.getJSONArray(i).let {
                         MeshTriangle(it.getInt(0), it.getInt(1), it.getInt(2))
                     } },
-                    root.getInt("registeredPhotos"), root.getInt("suppliedPhotos")
+                    root.getInt("registeredPhotos"), root.getInt("suppliedPhotos"), root.optDouble("fieldOfView", 60.0)
                 ).also { it.validate() }
             }
         }
@@ -43,6 +43,7 @@ internal class ScannerMeshStore(context: Context) {
         mesh.validate()
         val root = JSONObject().put("sources", fingerprint(session))
             .put("registeredPhotos", mesh.registeredPhotos).put("suppliedPhotos", mesh.suppliedPhotos)
+            .put("fieldOfView", mesh.fieldOfViewDegrees)
             .put("vertices", JSONArray().also { array -> mesh.vertices.forEach { point ->
                 array.put(JSONArray().put(point.x).put(point.y).put(point.z))
             } })

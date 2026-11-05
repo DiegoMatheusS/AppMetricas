@@ -37,7 +37,12 @@ class NativeVisionTest {
         val paint = Paint().apply { color = Color.BLACK; strokeWidth = 9f }
         Canvas(bitmap).apply {
             drawColor(Color.WHITE)
-            drawLine(80f, 80f, 520f, 80f, paint)
+            drawLine(80f, 80f, 230f, 80f, paint)
+            drawLine(330f, 80f, 520f, 80f, paint)
+            paint.strokeWidth = 1f
+            drawLine(230f, 78f, 330f, 78f, paint)
+            drawLine(230f, 82f, 330f, 82f, paint)
+            paint.strokeWidth = 9f
             drawLine(80f, 80f, 80f, 420f, paint)
             drawLine(520f, 80f, 520f, 420f, paint)
             drawLine(80f, 420f, 270f, 420f, paint)
@@ -49,6 +54,7 @@ class NativeVisionTest {
             val draft = PlanImageRecognition.detect(bitmap, floor)
             assertTrue(draft.walls.size >= 4)
             assertTrue(draft.openings.any { it.type == OpeningType.DOOR })
+            assertTrue(draft.openings.any { it.type == OpeningType.WINDOW })
         } finally { bitmap.recycle() }
     }
 

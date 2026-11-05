@@ -91,6 +91,7 @@ fun ScannerCaptureScreen() {
     LaunchedEffect(activeId, refresh) {
         val selected = active
         mesh = if (selected == null) null else withContext(Dispatchers.IO) { meshStore.read(selected) }
+        mesh?.let { fieldOfView = it.fieldOfViewDegrees.toString() }
     }
     val exportObj = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         val model = mesh

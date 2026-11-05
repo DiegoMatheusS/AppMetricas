@@ -16,8 +16,8 @@ import kotlinx.coroutines.withContext
 /** Recognition is reviewed on the actual floor image before it changes the saved project. */
 @Composable
 internal fun PlanRecognitionControls(bitmap: Bitmap, floor: PlanFloor, onApply: (PlanFloor) -> Unit) {
-    var draft by remember(floor.imageFile) { mutableStateOf<PlanRecognitionDraft?>(null) }
-    var selected by remember(floor.imageFile) { mutableStateOf<Set<Int>>(emptySet()) }
+    var draft by remember(floor) { mutableStateOf<PlanRecognitionDraft?>(null) }
+    var selected by remember(floor) { mutableStateOf<Set<Int>>(emptySet()) }
     var doors by remember { mutableStateOf(true) }
     var windows by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
