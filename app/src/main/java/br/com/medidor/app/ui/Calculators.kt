@@ -118,8 +118,8 @@ fun TankCalculatorScreen(
 ) {
     var shape by rememberSaveable { mutableStateOf(TankShape.VERTICAL.name) }
     var illustration by rememberSaveable { mutableStateOf(TankIllustration.VERTICAL.name) }
-    var diameter by rememberSaveable { mutableStateOf("12") }
-    var size by rememberSaveable { mutableStateOf("8") }
+    var diameter by rememberSaveable { mutableStateOf("") }
+    var size by rememberSaveable { mutableStateOf("") }
     var level by rememberSaveable { mutableStateOf("0") }
     var levelUnit by rememberSaveable { mutableStateOf(TankLevelUnit.METERS.name) }
     var densityText by rememberSaveable { mutableStateOf("") }
@@ -257,6 +257,15 @@ fun TankCalculatorScreen(
                     size, Modifier.weight(1f)
                 ) { size = it; sizeFromAr = false; saved = false }
             }
+        }
+        if (fromAr) {
+            Text(
+                "Valores AR são ESTIMATIVAS das superfícies visíveis, " +
+                    "possivelmente externas. Confira e substitua por dimensões INTERNAS " +
+                    "antes de utilizar a capacidade útil do tanque.",
+                color = Color(0xFF8A4729),
+                style = MaterialTheme.typography.bodySmall
+            )
         }
         Card(
             modifier = Modifier.fillMaxWidth(),
