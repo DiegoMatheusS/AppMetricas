@@ -71,7 +71,10 @@ internal class ArMeasurementRenderer(
 
     fun undo() {
         automatic = false
-        if (areaMode && corners.size > 1) {
+        if (tankDimensions.isNotEmpty() && anchors.isEmpty() &&
+            measuredDimensions.isNotEmpty()) {
+            measuredDimensions.removeAt(measuredDimensions.lastIndex)
+        } else if (areaMode && corners.size > 1) {
             corners.removeAt(corners.lastIndex)
         } else {
             anchors.removeLastOrNull()?.detach()
@@ -95,8 +98,18 @@ internal class ArMeasurementRenderer(
         confirmations = 0
     }
 
+    /** Discard both confirmed and unconfirmed tank dimensions and start a new scan. */
+    fun restartTankMeasurement() {
+        measuredDimensions.clear()
+        clear()
+    }
+
     fun takeTankDimension(): List<Double>? {
         val length = latest.sides.singleOrNull() ?: return null
+        if (!length.isFinite() || length !in 0.02..30.0) {
+            notice = "Dimensão fora do intervalo de 2 cm a 30 m. Refaça os pontos."
+            return null
+        }
         if (measuredDimensions.size >= tankDimensions.size) return null
         measuredDimensions += length
         clear()
