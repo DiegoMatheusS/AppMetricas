@@ -24,5 +24,13 @@ class TankCameraCaptureTest {
         val capture=TankCameraCapture(TankShape.VERTICAL,listOf(2.0,3.0)).validated()!!
         val result=TankCalculator.calculate(capture.shape,capture.dimensions[0],capture.dimensions[1],0.0)
         assertEquals(Math.PI * 3.0,result.capacityM3,1e-6)
+        assertEquals(0.0, result.occupiedM3, 1e-8)
+    }
+    @Test fun emptyTanksAllRemainComputable() {
+        for (shape in TankShape.entries) {
+            val result = TankCalculator.calculate(shape, 2.0, 3.0, 0.0)
+            assertEquals(0.0, result.occupiedM3, 1e-8)
+            assertEquals(result.capacityM3, result.freeM3, 1e-8)
+        }
     }
 }
