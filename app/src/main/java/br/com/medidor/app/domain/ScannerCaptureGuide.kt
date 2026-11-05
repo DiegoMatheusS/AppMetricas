@@ -1,6 +1,6 @@
 package br.com.medidor.app.domain
 
-/** Guided image acquisition only; these photos are NOT yet reconstructed into a mesh. */
+/** Photo positions support overlapping images for offline reconstruction. */
 enum class ScanPass(val label: String) {
     HORIZON("Volta horizontal"),
     ELEVATED("Volta elevada")

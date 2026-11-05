@@ -154,7 +154,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                                 val regions = LiveObjectCounter.detect(
                                     sampled.pixels,
                                     sampled.width, sampled.height,
-                                    threshold.get()
+                                    threshold.get(), reference = target.get()
                                 )
                                 val version = generation.get()
                                 if (version != previousGeneration) {
@@ -176,7 +176,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                             }
                         }
                     } catch (_: Exception) {
-                        // Drop a failed camera frame without reusing a stale count.
+                        stabilizer.reset()
+                        main.execute { if (!disposed.get()) stableCount = null }
                     } finally {
                         frame.close()
                     }

@@ -428,11 +428,11 @@ internal fun LiveContourCamera(
                         else -> "Sem contorno — veja orientação"
                     },
                     color = Color.White, fontSize = 12.sp,
-                    modifier = Modifier.background(ink.copy(alpha = 0.93f),
+                    modifier = Modifier.weight(1f).background(ink.copy(alpha = 0.93f),
                         RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 7.dp)
                 )
                 TextButton(onClick = onAr) {
-                    Text("Medir em AR", color = lime, fontWeight = FontWeight.SemiBold)
+                    Text("Medir automaticamente", color = lime, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

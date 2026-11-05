@@ -35,6 +35,11 @@ import kotlin.math.sin
 @Composable
 fun OrbitModelPreview(plan: ArchitectPlan, allFloors: Boolean, showLines: Boolean) {
     val faces = remember(plan, allFloors) { Architect3dGeometry.model(plan, allFloors) }
+    MeshModelPreview(faces, showLines)
+}
+
+@Composable
+internal fun MeshModelPreview(faces: List<ModelFace>, showLines: Boolean = true) {
     var yaw by remember { mutableStateOf(.75f) }
     var elevation by remember { mutableStateOf(.65f) }
     var zoom by remember { mutableStateOf(1f) }
@@ -42,7 +47,7 @@ fun OrbitModelPreview(plan: ArchitectPlan, allFloors: Boolean, showLines: Boolea
         Text("Arraste para girar • use dois dedos para aproximar ou afastar")
         Canvas(
             Modifier.fillMaxWidth().height(340.dp)
-                .background(Color(0xFFE9F0F3))
+                .background(Color(0xFFEDF1E8))
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, scale, rotation ->
                         yaw += rotation + pan.x * .007f
@@ -85,8 +90,8 @@ fun OrbitModelPreview(plan: ArchitectPlan, allFloors: Boolean, showLines: Boolea
                 val midX = (minX + maxX) / 2
                 val midY = (minY + maxY) / 2
                 val firstFloor = listOf(
-                    Color(0xFF4E9DB3), Color(0xFF3F8097), Color(0xFF6AAEC0),
-                    Color(0xFF36758E), Color(0xFF8FC5D0), Color(0xFF34697C)
+                    Color(0xFFC5D1BC), Color(0xFFA9BAA0), Color(0xFFD9E2D2),
+                    Color(0xFF93A58B), Color(0xFFE3EADA), Color(0xFF879C7F)
                 )
                 val secondFloor = listOf(
                     Color(0xFF91B7A1), Color(0xFF6F9C82), Color(0xFFA3C8AF),

@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -46,19 +47,23 @@ enum class LiveMeasureTool { RULER, AREA, TANK }
 fun AppShell() {
     val context = LocalContext.current
     val store = remember(context) { LocalHistory(context.applicationContext) }
-    var destinationName by rememberSaveable { mutableStateOf(Destination.HOME.name) }
-    val destination = Destination.entries.firstOrNull { it.name == destinationName }
+    var navigation by rememberSaveable { mutableStateOf(listOf(Destination.HOME.name)) }
+    val destination = Destination.entries.firstOrNull { it.name == navigation.lastOrNull() }
         ?: Destination.HOME
+    val screenState = rememberSaveableStateHolder()
     var records by remember { mutableStateOf(store.load()) }
     LaunchedEffect(destination) {
         if (destination == Destination.HISTORY || destination == Destination.HOME) {
             records = store.load()
         }
     }
-    fun navigate(to: Destination) { destinationName = to.name }
-    BackHandler(enabled = destination != Destination.HOME) {
-        navigate(Destination.HOME)
+    fun navigate(to: Destination) {
+        navigation = AppNavigation.open(navigation, to)
     }
+    fun goBack() {
+        navigation = AppNavigation.back(navigation)
+    }
+    BackHandler(enabled = destination != Destination.HOME) { goBack() }
     fun addRecord(title: String, details: String) {
         records = store.save(title, details)
     }
@@ -79,7 +84,7 @@ fun AppShell() {
                         Text(destination.label, style = MaterialTheme.typography.titleMedium)
                     },
                     navigationIcon = {
-                        TextButton(onClick = { navigate(Destination.HOME) }) {
+                        TextButton(onClick = ::goBack) {
                             Text("‹ Voltar")
                         }
                     }
@@ -88,6 +93,7 @@ fun AppShell() {
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
+            screenState.SaveableStateProvider(destination.name) {
             when (destination) {
                 Destination.HOME -> HomeScreen(onOpen = ::navigate, records = records)
                 Destination.RULER, Destination.AREA, Destination.TANK_CAMERA,
@@ -98,7 +104,7 @@ fun AppShell() {
                         Destination.TANK_CAMERA -> LiveMeasureTool.TANK
                         else -> LiveMeasureTool.RULER
                     },
-                    onBack = { navigate(Destination.HOME) },
+                    onBack = ::goBack,
                     onManual = {
                         navigate(if (destination == Destination.TANK_CAMERA)
                             Destination.TANK else Destination.BOX)
@@ -123,21 +129,22 @@ fun AppShell() {
                 Destination.PRO -> ProScreen()
                 Destination.ARCHITECT -> ArchitectScreen()
                 Destination.ARCHITECT_SCAN -> ArchitectScanScreen(
-                    onBack = { navigate(Destination.HOME) },
+                    onBack = ::goBack,
                     onCaptured = { /* Remain in the live camera after scanning. */ },
                     onReview = { navigate(Destination.ARCHITECT_REVIEW) }
                 )
                 Destination.SCANNER -> ScannerCaptureScreen()
                 Destination.ARCHITECT_REVIEW -> ArchitectReviewScreen(
-                    onBack = { navigate(Destination.HOME) },
+                    onBack = ::goBack,
                     onEdit = { navigate(Destination.ARCHITECT) },
                     onScan = { navigate(Destination.ARCHITECT_SCAN) }
                 )
                 Destination.COUNT -> ObjectCountHome(
                     onSave = ::addRecord,
-                    onBack = { navigate(Destination.HOME) }
+                    onBack = ::goBack
                 )
                 Destination.MORE -> MoreToolsScreen(onOpen = ::navigate)
+            }
             }
         }
     }

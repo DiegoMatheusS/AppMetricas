@@ -24,7 +24,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import br.com.medidor.app.data.ScannerMeshStore
+import br.com.medidor.app.domain.ReconstructedMesh
+import br.com.medidor.app.vision.PhotoReconstruction
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,8 +57,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Capture-only first milestone: photos saved locally, with no photogrammetry or
- * misleading measurement/reconstruction button.
+ * Guided acquisition, bounded offline reconstruction, preview and OBJ export.
  */
 @Composable
 fun ScannerCaptureScreen() {
@@ -74,12 +82,39 @@ fun ScannerCaptureScreen() {
     var correspondenceReport by remember { mutableStateOf<ScanCorrespondenceReport?>(null) }
     var correspondenceSessionId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val meshStore = remember(context) { ScannerMeshStore(context.applicationContext) }
+    var mesh by remember { mutableStateOf<ReconstructedMesh?>(null) }
+    var fieldOfView by remember { mutableStateOf("60") }
+    var reconstructionProgress by remember { mutableStateOf<String?>(null) }
+    var reconstructionJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val meshFaces = remember(mesh) { mesh?.faces().orEmpty() }
+    LaunchedEffect(activeId, refresh) {
+        val selected = active
+        mesh = if (selected == null) null else withContext(Dispatchers.IO) { meshStore.read(selected) }
+        mesh?.let { fieldOfView = it.fieldOfViewDegrees.toString() }
+    }
+    val exportObj = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val model = mesh
+        if (uri != null && model != null && !busy) scope.launch {
+            busy = true
+            try {
+                withContext(Dispatchers.IO) {
+                    val output = context.contentResolver.openOutputStream(uri) ?: error("Não foi possível criar o OBJ.")
+                    output.bufferedWriter().use { model.writeObj(it) }
+                }
+                feedback = "Modelo OBJ exportado."
+            } catch (e: Exception) {
+                feedback = "Falha ao exportar o modelo: ${e.localizedMessage}"
+            } finally { busy = false }
+        }
+    }
 
     fun reload(id: String?) {
         sessions = store.list()
         activeId = id?.takeIf { requested -> sessions.any { it.id == requested } }
             ?: sessions.firstOrNull()?.id
         refresh++
+        mesh = null
         qualityReport = null
         reportSessionId = null
         correspondenceReport = null
@@ -252,10 +287,10 @@ fun ScannerCaptureScreen() {
         modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Scanner 3D — captura guiada", style = MaterialTheme.typography.headlineSmall,
+        Text("Scanner 3D", style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold)
-        Text("Etapa experimental de aquisição de fotografias. Ainda NÃO cria modelos 3D, " +
-            "não mede profundidade e não faz fotogrametria automática.",
+        Text("Fotografe o objeto imóvel de vários ângulos para reconstruir sua superfície. " +
+            "O modelo é proporcional e pode ficar incompleto quando faltam detalhes nas fotos.",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Deixe o objeto imóvel e caminhe ao redor, mantendo boa iluminação. " +
             "Evite objetos transparentes, brilhantes ou em movimento. " +
@@ -271,8 +306,10 @@ fun ScannerCaptureScreen() {
             sessions.forEach { session ->
                 FilterChip(
                     selected = activeId == session.id,
+                    enabled = !busy,
                     onClick = {
                         activeId = session.id
+                        mesh = null
                         position = ScannerCaptureGuide.nextMissing(session.frames.keys) ?: 0
                         showCamera = false
                         feedback = null
@@ -285,7 +322,7 @@ fun ScannerCaptureScreen() {
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 enabled = !busy && sessions.size < ScannerCaptureGuide.MAX_SESSIONS,
                 onClick = {
@@ -306,7 +343,7 @@ fun ScannerCaptureScreen() {
 
         Text("Backup separado das sessões do Scanner:",
             style = MaterialTheme.typography.titleSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !busy && active != null, onClick = {
                 exportingId = active?.id
                 exportZip.launch("scanner-medidor.zip")
@@ -335,9 +372,70 @@ fun ScannerCaptureScreen() {
                 modifier = Modifier.fillMaxWidth()
             )
             if (active.isComplete) {
-                Text("As 20 posições sugeridas foram fotografadas. " +
-                    "Os arquivos estão salvos, mas a reconstrução do modelo 3D ainda não está implementada.",
+                Text("As 20 posições foram fotografadas. Você pode gerar o modelo 3D.",
                     color = MaterialTheme.colorScheme.primary)
+            }
+            OutlinedTextField(
+                value = fieldOfView, onValueChange = { fieldOfView = it },
+                enabled = !busy, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Campo de visão horizontal da câmera (graus)") },
+                supportingText = { Text("Use o valor da câmera, quando conhecido. A estimativa inicial é 60°.") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+            )
+            Button(enabled = !busy && !showCamera && active.frames.size >= 3, onClick = {
+                val selected = active
+                val fov = fieldOfView.replace(',', '.').toDoubleOrNull()
+                if (fov == null || !fov.isFinite() || fov !in 25.0..100.0) {
+                    feedback = "Informe um campo de visão entre 25° e 100°."
+                } else {
+                    busy = true
+                    reconstructionJob = scope.launch {
+                        try {
+                            val jobContext = coroutineContext
+                            val model = withContext(Dispatchers.Default) {
+                                PhotoReconstruction.reconstruct(selected.frames.keys.sorted(), fov,
+                                    load = { slot -> store.thumbnail(selected.frames[slot]) },
+                                    progress = { message ->
+                                        jobContext.ensureActive()
+                                        scope.launch {
+                                            if (reconstructionJob?.isActive == true) reconstructionProgress = message
+                                        }
+                                    })
+                            }
+                            jobContext.ensureActive()
+                            val latest = store.list().firstOrNull { it.id == selected.id }
+                            check(latest?.frames == selected.frames) { "As fotos da sessão mudaram. Gere o modelo novamente." }
+                            withContext(Dispatchers.IO) { meshStore.save(selected, model) }
+                            if (activeId == selected.id) mesh = model
+                            feedback = "Superfície reconstruída com ${model.registeredPhotos}/${model.suppliedPhotos} fotos."
+                        } catch (e: CancellationException) {
+                            feedback = "Reconstrução cancelada."
+                            throw e
+                        } catch (e: Exception) {
+                            feedback = "Não foi possível reconstruir: ${e.localizedMessage}"
+                        } finally {
+                            busy = false
+                            reconstructionProgress = null
+                            reconstructionJob = null
+                        }
+                    }
+                }
+            }) { Text(if (mesh == null) "Gerar modelo 3D" else "Reconstruir modelo") }
+            reconstructionProgress?.let { message ->
+                Text(message)
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                OutlinedButton(onClick = { reconstructionJob?.cancel() }) { Text("Cancelar reconstrução") }
+            }
+            mesh?.let { model ->
+                Text("Modelo 3D • ${model.vertices.size} pontos • ${model.triangles.size} faces",
+                    style = MaterialTheme.typography.titleMedium)
+                MeshModelPreview(meshFaces)
+                Text("Superfície parcial em escala proporcional. " +
+                    "Fotos com fundo simples, textura e sobreposição melhoram o resultado.",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(enabled = !busy, onClick = {
+                    exportObj.launch("modelo-scanner.obj")
+                }) { Text("Exportar modelo OBJ") }
             }
             OutlinedButton(enabled = !busy && !showCamera && active.frames.isNotEmpty(),
                 onClick = {
@@ -451,8 +549,8 @@ fun ScannerCaptureScreen() {
                 }
                 Text("Além da comparação 2D, uma verificação epipolar experimental " +
                     "testa se os pontos são compatíveis com duas vistas. Uma matriz " +
-                    "fundamental estimada não recupera calibração, profundidade, pose 3D " +
-                    "nem garante que a cena possa ser triangulada. Nenhuma malha é gerada.",
+                    "fundamental ajuda a selecionar fotos compatíveis. Use Gerar modelo 3D " +
+                    "para reconstruir e conferir a superfície.",
                     style = MaterialTheme.typography.bodySmall)
             }
             Text("Selecione a posição da fotografia:", fontWeight = FontWeight.SemiBold)
@@ -465,6 +563,7 @@ fun ScannerCaptureScreen() {
                     ScannerCaptureGuide.positions.filter { it.pass == pass }.forEach { item ->
                         FilterChip(
                             selected = position == item.index,
+                            enabled = !busy,
                             onClick = { position = item.index; showCamera = false; feedback = null },
                             label = { Text("${item.index + 1}${if (item.index in captured) " ✓" else ""}") }
                         )
@@ -486,7 +585,7 @@ fun ScannerCaptureScreen() {
                     contentScale = ContentScale.Fit
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(enabled = !busy, onClick = {
                     gallery.launch("image/*")
                 }) { Text(if (position in captured) "Trocar pela galeria" else "Importar da galeria") }

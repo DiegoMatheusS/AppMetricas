@@ -65,7 +65,10 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraX")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     implementation("com.google.ar:core:1.56.0")
+    implementation("org.opencv:opencv:4.13.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
