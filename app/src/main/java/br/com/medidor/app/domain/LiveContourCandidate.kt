@@ -46,14 +46,24 @@ object LiveContourCandidate {
             }
         }
 
-        val regions = LiveObjectCounter.detect(
-            pixels, width, height, (tolerance + 12).coerceIn(15, 100)
-        ).filter { region ->
-            bounds == null || (region.left >= bounds.left &&
-                region.right <= bounds.right &&
-                region.top >= bounds.top &&
-                region.bottom <= bounds.bottom)
-        }
+        // Try a small bounded range of contrast thresholds instead of only
+        // one fixed value. This helps dark or low-contrast objects without
+        // accepting background-scale blobs, which are rejected by quality checks.
+        val thresholds = listOf(tolerance + 12, tolerance - 9, tolerance + 28)
+            .map { it.coerceIn(15, 100) }.distinct()
+        val regions = thresholds.flatMap { threshold ->
+            LiveObjectCounter.detect(pixels, width, height, threshold)
+                .filter { region ->
+                    (bounds == null || (region.left >= bounds.left &&
+                        region.right <= bounds.right &&
+                        region.top >= bounds.top &&
+                        region.bottom <= bounds.bottom)) &&
+                        region.area.toDouble() / (width * height) in .002.. .45 &&
+                        ContourVisualQuality.assess(
+                            fromRegion(region, width, height), bounds = bounds
+                        ).rating != ContourVisualRating.LOW
+                }
+        }.distinctBy { listOf(it.left, it.top, it.right, it.bottom) }
         val chosen = if (seed != null) {
             // A manual tap must not jump to an unrelated object elsewhere.
             // Allow a small correction for the user's imprecise touch.

@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +44,7 @@ import br.com.medidor.app.domain.TankCalculator
 import br.com.medidor.app.domain.TankShape
 import br.com.medidor.app.domain.TankLevelUnit
 import br.com.medidor.app.domain.TankFillInput
+import br.com.medidor.app.domain.TankCameraCapture
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -108,11 +110,16 @@ fun BoxCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit =
 }
 
 @Composable
-fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit = {}) {
+fun TankCalculatorScreen(
+    onSave: (String, String) -> Unit,
+    onCamera: () -> Unit = {},
+    incomingAr: TankCameraCapture? = null,
+    onArImported: () -> Unit = {}
+) {
     var shape by rememberSaveable { mutableStateOf(TankShape.VERTICAL.name) }
     var illustration by rememberSaveable { mutableStateOf(TankIllustration.VERTICAL.name) }
-    var diameter by rememberSaveable { mutableStateOf("12") }
-    var size by rememberSaveable { mutableStateOf("8") }
+    var diameter by rememberSaveable { mutableStateOf("") }
+    var size by rememberSaveable { mutableStateOf("") }
     var level by rememberSaveable { mutableStateOf("0") }
     var levelUnit by rememberSaveable { mutableStateOf(TankLevelUnit.METERS.name) }
     var densityText by rememberSaveable { mutableStateOf("") }
@@ -121,6 +128,31 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
     val context = LocalContext.current
     var diameterFromAr by rememberSaveable { mutableStateOf(false) }
     var sizeFromAr by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(incomingAr) {
+        incomingAr?.validated()?.let { measurement ->
+            shape = measurement.shape.name
+            illustration = when (measurement.shape) {
+                TankShape.VERTICAL -> TankIllustration.VERTICAL.name
+                TankShape.HORIZONTAL -> TankIllustration.HORIZONTAL.name
+                TankShape.SPHERE -> TankIllustration.SPHERE.name
+            }
+            diameter = String.format(Locale.US, "%.3f", measurement.dimensions[0])
+                .replace('.', ',')
+            diameterFromAr = true
+            if (measurement.dimensions.size == 2) {
+                size = String.format(Locale.US, "%.3f", measurement.dimensions[1])
+                    .replace('.', ',')
+                sizeFromAr = true
+            } else {
+                size = ""
+                sizeFromAr = false
+            }
+            level = "0"
+            levelUnit = TankLevelUnit.METERS.name
+            saved = false
+            onArImported()
+        }
+    }
     val arLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { outcome ->
         val data = outcome.data
         if (outcome.resultCode == Activity.RESULT_OK && data != null &&
@@ -225,6 +257,15 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
                     size, Modifier.weight(1f)
                 ) { size = it; sizeFromAr = false; saved = false }
             }
+        }
+        if (fromAr) {
+            Text(
+                "Valores AR são ESTIMATIVAS das superfícies visíveis, " +
+                    "possivelmente externas. Confira e substitua por dimensões INTERNAS " +
+                    "antes de utilizar a capacidade útil do tanque.",
+                color = Color(0xFF8A4729),
+                style = MaterialTheme.typography.bodySmall
+            )
         }
         Card(
             modifier = Modifier.fillMaxWidth(),

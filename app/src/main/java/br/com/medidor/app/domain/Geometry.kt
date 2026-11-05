@@ -47,6 +47,7 @@ object Geometry {
     fun verticalCylinderLiquidVolume(diameter: Double, height: Double, liquidLevel: Double): Double {
         requirePositive(diameter, height)
         requireLevel(liquidLevel, height)
+        if (liquidLevel == 0.0) return 0.0 // Empty tank, not an invalid cylinder.
         return cylinderVolume(diameter, liquidLevel)
     }
 

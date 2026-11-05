@@ -54,6 +54,18 @@ class LiveContourCandidateTest {
         assertNotNull(next.result)
     }
 
+    @Test fun lowContrastAreaIsFoundUsingAlternateThreshold() {
+        val pixels = IntArray(width * height) { index ->
+            val x = index % width
+            val y = index / width
+            if (x in 30..62 && y in 19..54) 0xFF9F9F9F.toInt()
+            else 0xFFBBBBBB.toInt()
+        }
+        val result = LiveContourCandidate.find(pixels, width, height, null)
+        assertNotNull(result.result)
+        assertEquals(30, result.result!!.minX)
+    }
+
     @Test fun manualBoundRestrictsSelectionAndReportsInvalidTap() {
         val region = ContourSearchBounds(30,15,65,60)
         val rejected = LiveContourCandidate.find(
