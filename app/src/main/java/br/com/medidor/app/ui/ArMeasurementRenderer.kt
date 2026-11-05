@@ -4,10 +4,15 @@ import android.graphics.PointF
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.os.SystemClock
+import br.com.medidor.app.domain.ArFrameValidity
+import br.com.medidor.app.domain.ArMeasurementChecks
+import br.com.medidor.app.domain.ArMeasurementStability
 import br.com.medidor.app.domain.AutomaticContourGeometry
-import br.com.medidor.app.domain.PointMeasurementGeometry
 import br.com.medidor.app.domain.LiveContourTracking
 import br.com.medidor.app.domain.PlanarContourResult
+import br.com.medidor.app.domain.Point3d
+import br.com.medidor.app.domain.PointMeasurementGeometry
 import br.com.medidor.app.vision.VisualBoundaryDetector
 import com.google.ar.core.Coordinates2d
 import com.google.ar.core.HitResult
@@ -32,7 +37,8 @@ internal data class ArMeasurementFrame(
     val area: Double? = null,
     val message: String = "",
     val dimensionIndex: Int = 0,
-    val automatic: Boolean = true
+    val automatic: Boolean = true,
+    val canConfirm: Boolean = false
 )
 
 internal class ArMeasurementRenderer(
@@ -41,7 +47,22 @@ internal class ArMeasurementRenderer(
     private val tankDimensions: List<String>,
     private val publish: (ArMeasurementFrame) -> Unit
 ) : GLSurfaceView.Renderer {
+    private val frameValidity = ArFrameValidity()
     @Volatile var session: Session? = null
+        set(value) {
+            if (field !== value) {
+                frameValidity.invalidate()
+                latest = latest.copy(canConfirm = false)
+                resetStabilityRequested = true
+            }
+            field = value
+        }
+    @Volatile private var resetStabilityRequested = false
+    private var worldSession: Session? = null
+    private val automaticStability = ArMeasurementStability()
+    private val anchorStability = ArMeasurementStability()
+    private var pendingSurface: Plane? = null
+    private var lastAnalysisTimestamp = 0L
     private val background = ArCameraBackground()
     private val tap = AtomicReference<PointF?>()
     private val anchors = mutableListOf<Anchor>()
@@ -51,7 +72,7 @@ internal class ArMeasurementRenderer(
     private var viewportWidth = 1
     private var viewportHeight = 1
     private var notice: String? = null
-    private var latest = ArMeasurementFrame()
+    @Volatile private var latest = ArMeasurementFrame()
     private var automatic = true
     private var lastAnalysis = 0L
     private var pendingBoundary: PlanarContourResult? = null
@@ -77,25 +98,38 @@ internal class ArMeasurementRenderer(
         } else if (areaMode && corners.size > 1) {
             corners.removeAt(corners.lastIndex)
         } else {
-            anchors.removeLastOrNull()?.detach()
+            anchors.removeLastOrNull()?.let { anchor ->
+                try { anchor.detach() } catch (_: Exception) { }
+            }
             corners.clear()
             areaPlane = null
         }
         tap.set(null)
+        anchorStability.reset()
+        automaticStability.reset()
         latest = ArMeasurementFrame()
         notice = null
     }
 
     fun clear() {
-        anchors.forEach(Anchor::detach)
+        anchors.forEach { anchor ->
+            try { anchor.detach() } catch (_: Exception) { }
+        }
         anchors.clear()
         corners.clear()
         areaPlane = null
         tap.set(null)
         latest = ArMeasurementFrame()
         notice = null
+        resetStability()
+    }
+
+    private fun resetStability() {
         pendingBoundary = null
+        pendingSurface = null
         confirmations = 0
+        automaticStability.reset()
+        anchorStability.reset()
     }
 
     /** Discard both confirmed and unconfirmed tank dimensions and start a new scan. */
@@ -105,7 +139,7 @@ internal class ArMeasurementRenderer(
     }
 
     fun takeTankDimension(): List<Double>? {
-        val length = latest.sides.singleOrNull() ?: return null
+        val length = measurement().sides.singleOrNull() ?: return null
         if (!length.isFinite() || length !in 0.02..30.0) {
             notice = "Dimensão fora do intervalo de 2 cm a 30 m. Refaça os pontos."
             return null
@@ -116,7 +150,9 @@ internal class ArMeasurementRenderer(
         return measuredDimensions.toList().takeIf { it.size == tankDimensions.size }
     }
 
-    fun measurement(): ArMeasurementFrame = latest
+    fun measurement(): ArMeasurementFrame =
+        if (session != null && latest.canConfirm && frameValidity.canConfirm(SystemClock.elapsedRealtime())) latest
+        else latest.copy(sides = emptyList(), area = null, canConfirm = false)
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(.04f, .08f, .1f, 1f)
@@ -133,20 +169,40 @@ internal class ArMeasurementRenderer(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         val arSession = session ?: return
         try {
+            if (worldSession !== arSession) {
+                clear()
+                measuredDimensions.clear()
+                frameValidity.reset()
+                lastAnalysisTimestamp = 0L
+                worldSession = arSession
+            }
+            if (resetStabilityRequested) {
+                resetStability()
+                resetStabilityRequested = false
+            }
             arSession.setCameraTextureName(background.texture)
             arSession.setDisplayGeometry(rotation(), viewportWidth, viewportHeight)
             val frame = arSession.update()
             background.draw(frame)
-            val touch = tap.getAndSet(null)
-            if (frame.camera.trackingState != TrackingState.TRACKING) {
-                showUnavailable("Mova devagar a câmera em um local bem iluminado até recuperar o rastreamento.")
+            val camera = frame.camera
+            val tracking = camera.trackingState == TrackingState.TRACKING
+            if (!frameValidity.update(frame.timestamp, tracking, SystemClock.elapsedRealtime())) {
+                tap.set(null)
+                resetStability()
+                showUnavailable(if (tracking) "Aguardando uma nova imagem da câmera…"
+                    else "Mova devagar a câmera em um local bem iluminado até recuperar o rastreamento.")
                 return
             }
+            camera.getProjectionMatrix(projection, 0, .05f, 100f)
+            camera.getViewMatrix(view, 0)
+            Matrix.multiplyMM(projectionView, 0, projection, 0, view, 0)
+            val touch = tap.getAndSet(null)
             if (anchors.any { it.trackingState == TrackingState.STOPPED }) {
                 clear()
                 notice = "A referência foi perdida. Marque os pontos novamente."
             }
             if (anchors.any { it.trackingState != TrackingState.TRACKING }) {
+                resetStability()
                 showUnavailable("Rastreamento dos pontos pausado. Aponte de volta para a superfície.")
                 return
             }
@@ -168,9 +224,10 @@ internal class ArMeasurementRenderer(
     }
 
     private fun detectAutomatically(frame: Frame) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastAnalysis < 650) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastAnalysis < 650 || frame.timestamp <= lastAnalysisTimestamp) return
         lastAnalysis = now
+        lastAnalysisTimestamp = frame.timestamp
         try {
             val boundary = frame.acquireCameraImage().use { image ->
                 val sampled = ArCameraImageSampler.sample(image)
@@ -186,20 +243,25 @@ internal class ArMeasurementRenderer(
                 found to List(found.corners.size) { PointF(screen[it * 2], screen[it * 2 + 1]) }
             }
             if (boundary == null) {
-                pendingBoundary = null
-                confirmations = 0
+                resetStability()
                 notice = "Enquadre um objeto inteiro, com bordas visíveis e fundo contrastante."
                 return
             }
             val (found, screen) = boundary
-            confirmations = if (LiveContourTracking.overlap(pendingBoundary, found.region) >= .6)
-                confirmations + 1 else 1
+            val sameContour = LiveContourTracking.overlap(pendingBoundary, found.region) >= .6
+            if (!sameContour) automaticStability.reset()
+            confirmations = if (sameContour) confirmations + 1 else 1
             pendingBoundary = found.region
             if (confirmations < 3) {
                 notice = "Contorno encontrado. Mantenha o celular firme para confirmar."
                 return
             }
-            val center = PointF(screen.map { it.x }.average().toFloat(), screen.map { it.y }.average().toFloat())
+            val polygonOnScreen = screen.map { it.x.toDouble() to it.y.toDouble() }
+            val centroid = AutomaticContourGeometry.centroid(polygonOnScreen) ?: run {
+                rejectAutomatic("Enquadre uma superfície com contorno fechado e sem cruzamentos.")
+                return
+            }
+            val center = PointF(centroid.first.toFloat(), centroid.second.toFloat())
             fun hits(point: PointF): List<HitResult> {
                 val inset = if (tankDimensions.isEmpty()) 0f else .01f
                 val x = point.x * (1 - inset) + center.x * inset
@@ -211,65 +273,110 @@ internal class ArMeasurementRenderer(
                     val plane = it.trackable as? Plane
                     plane != null && plane.trackingState == TrackingState.TRACKING && plane.isPoseInPolygon(it.hitPose)
                 } ?: run {
-                    notice = "Contorno visível. Mova devagar a câmera para reconhecer a superfície."
+                    rejectAutomatic("Contorno visível. Mova devagar a câmera para reconhecer a superfície.")
                     return
                 }
                 val plane = rootPlane(centerHit.trackable as Plane)
                 val positions = screen.map { point ->
                     hits(point).firstOrNull {
                         val candidate = it.trackable as? Plane
-                        candidate != null && rootPlane(candidate) == plane &&
+                        candidate != null && candidate.trackingState == TrackingState.TRACKING &&
+                            rootPlane(candidate) == plane &&
                             candidate.isPoseInPolygon(it.hitPose)
                     }?.hitPose?.translation ?: run {
-                        notice = "Aguarde o reconhecimento de toda a superfície do contorno."
+                        rejectAutomatic("Aguarde o reconhecimento de toda a superfície do contorno.")
                         return
                     }
                 }
+                if (pendingSurface != plane) automaticStability.reset()
+                pendingSurface = plane
+                val candidates = positions.map(::point3d)
+                val selected = if (areaMode) candidates else
+                    ArMeasurementChecks.rulerEdge(candidates, automaticStability.referencePoints) ?: run {
+                        rejectAutomatic("Aguarde a câmera reconhecer uma borda completa.")
+                        return
+                    }
+                val stable = stableAutomatic(selected, frame) ?: return
                 if (areaMode) {
-                    val local = positions.map { centerHit.hitPose.inverse().transformPoint(it) }
+                    val local = stable.map { centerHit.hitPose.inverse().transformPoint(floatPoint(it)) }
                     val polygon = local.map { it[0].toDouble() to it[2].toDouble() }
                     if (local.any { abs(it[1]) > .03f } ||
                         PointMeasurementGeometry.polygonAreaSquareMeters(polygon) == null) {
-                        notice = "A superfície ainda está instável. Tente outro ângulo."
+                        rejectAutomatic("A superfície ainda está instável. Tente outro ângulo.")
                         return
                     }
                     anchors += centerHit.createAnchor()
                     areaPlane = plane
                     corners += polygon
                 } else {
-                    val pair = positions.indices.map { it to (it + 1) % positions.size }
-                        .maxByOrNull { (a, b) -> distance(positions[a], positions[b]) } ?: return
-                    anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(positions[pair.first]))
+                    anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(floatPoint(stable[0])))
                     try {
-                        anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(positions[pair.second]))
+                        anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(floatPoint(stable[1])))
                     } catch (e: Exception) {
                         clear()
                         throw e
                     }
                 }
             } else {
+                val centerHit = hits(center).firstOrNull {
+                    it.trackable is DepthPoint && it.trackable.trackingState == TrackingState.TRACKING
+                } ?: run {
+                    rejectAutomatic("Mova-se devagar até reconhecer a profundidade do tanque.")
+                    return
+                }
+                val centerWorld = centerHit.hitPose.translation
+                val up = project(centerWorld.copyOf().also { it[1] += .25f })
+                val down = project(centerWorld.copyOf().also { it[1] -= .25f })
+                if (up == null || down == null || hypot((up.x - down.x).toDouble(), (up.y - down.y).toDouble()) < 4) {
+                    rejectAutomatic("Enquadre a lateral do tanque para medir suas dimensões.")
+                    return
+                }
                 val vertical = (tankDimensions.firstOrNull() == "Diâmetro" &&
                     tankDimensions.lastOrNull() == "Comprimento" && measuredDimensions.isEmpty()) ||
                     (tankDimensions.lastOrNull() == "Altura" && measuredDimensions.isNotEmpty())
-                val axis = AutomaticContourGeometry.axisEndpoints(screen.map {
-                    it.x.toDouble() to it.y.toDouble()
-                }, vertical) ?: return
+                val gravity = (up.x - down.x).toDouble() to (up.y - down.y).toDouble()
+                val direction = if (vertical) gravity else -gravity.second to gravity.first
+                val axis = AutomaticContourGeometry.axisEndpoints(polygonOnScreen, direction) ?: run {
+                    rejectAutomatic("Enquadre o tanque inteiro, com as duas extremidades visíveis.")
+                    return
+                }
                 val ends = axis.map { (x, y) -> PointF(x.toFloat(), y.toFloat()) }.map { point ->
                     hits(point).firstOrNull { it.trackable is DepthPoint &&
                         it.trackable.trackingState == TrackingState.TRACKING } ?: run {
-                        notice = "Mova-se devagar até a câmera reconhecer a profundidade dos extremos."
+                        rejectAutomatic("Mova-se devagar até reconhecer a profundidade dos extremos.")
                         return
                     }
+                }.map { point3d(it.hitPose.translation) }
+                if (!ArMeasurementChecks.tankSection(ends, point3d(centerWorld), vertical)) {
+                    rejectAutomatic("Confira o enquadramento. Os extremos precisam pertencer ao tanque e ao eixo da medida.")
+                    return
                 }
-                if (distance(ends[0].hitPose.translation, ends[1].hitPose.translation) < .01) return
-                anchors += ends[0].createAnchor()
-                try { anchors += ends[1].createAnchor() } catch (e: Exception) { clear(); throw e }
+                val stable = stableAutomatic(ends, frame) ?: return
+                anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(floatPoint(stable[0])))
+                try {
+                    anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(floatPoint(stable[1])))
+                } catch (e: Exception) { clear(); throw e }
             }
             notice = "Medida automática encontrada. Confira o contorno e confirme."
         } catch (_: NotYetAvailableException) {
-            notice = "Preparando a imagem da câmera…"
+            rejectAutomatic("Preparando a imagem da câmera…")
         }
     }
+
+    private fun rejectAutomatic(message: String) {
+        automaticStability.reset()
+        pendingSurface = null
+        notice = message
+    }
+
+    private fun stableAutomatic(points: List<Point3d>, frame: Frame): List<Point3d>? {
+        val stable = automaticStability.observe(points, areaMode, frame.timestamp, SystemClock.elapsedRealtime())
+        if (stable == null) notice = "Conferindo a medida em 3D (${automaticStability.count}/3). Mantenha o objeto enquadrado."
+        return stable
+    }
+
+    private fun point3d(point: FloatArray) = Point3d(point[0].toDouble(), point[1].toDouble(), point[2].toDouble())
+    private fun floatPoint(point: Point3d) = floatArrayOf(point.x.toFloat(), point.y.toFloat(), point.z.toFloat())
 
     private fun placePoint(frame: Frame, touch: PointF) {
         val complete = if (areaMode) corners.size >= 12 else anchors.size >= 2
@@ -327,6 +434,7 @@ internal class ArMeasurementRenderer(
             }
             anchors += hit.createAnchor()
         }
+        anchorStability.reset()
         notice = null
     }
 
@@ -336,11 +444,6 @@ internal class ArMeasurementRenderer(
     }
 
     private fun updateOverlay(frame: Frame) {
-        val camera = frame.camera
-        camera.getProjectionMatrix(projection, 0, .05f, 100f)
-        camera.getViewMatrix(view, 0)
-        Matrix.multiplyMM(projectionView, 0, projection, 0, view, 0)
-
         val area = if (areaMode) PointMeasurementGeometry.polygonAreaSquareMeters(corners) else null
         val worldPoints = if (areaMode && corners.isNotEmpty()) {
             val origin = anchors.first().pose
@@ -357,10 +460,17 @@ internal class ArMeasurementRenderer(
             listOf(distance(worldPoints[0], worldPoints[1])).filter { it.isFinite() && it >= .01 }
         } else emptyList()
 
+        val hasMeasurement = if (areaMode) area != null else sides.isNotEmpty()
+        if (hasMeasurement) anchorStability.observe(worldPoints.map(::point3d), areaMode,
+            frame.timestamp, SystemClock.elapsedRealtime())
+        else anchorStability.reset()
+        val canConfirm = hasMeasurement && anchorStability.stable && frameValidity.canConfirm(SystemClock.elapsedRealtime())
         val dimensionIndex = measuredDimensions.size
         val dimension = tankDimensions.getOrNull(dimensionIndex)
-        val message = notice ?: when {
+        val message = if (hasMeasurement && !canConfirm) "Conferindo estabilidade da medida (${anchorStability.count}/3)…"
+            else notice ?: when {
             dimension != null && sides.isNotEmpty() -> "Confira os dois extremos e confirme a medida."
+            dimension != null && worldPoints.isEmpty() && automatic -> "Enquadre o tanque inteiro para detectar ${dimension.lowercase()}."
             dimension != null && worldPoints.isEmpty() -> "Toque no primeiro extremo de ${dimension.lowercase()}."
             dimension != null -> "Mova-se devagar e toque no extremo oposto, no mesmo eixo."
             area != null -> "Área fechada. Você pode adicionar cantos em sequência ou salvar."
@@ -371,11 +481,13 @@ internal class ArMeasurementRenderer(
             else -> "Toque no outro extremo. O primeiro ponto acompanha a superfície."
         }
         latest = ArMeasurementFrame(worldPoints.map(::project), sides, area,
-            message, dimensionIndex, automatic)
+            message, dimensionIndex, automatic, canConfirm)
         publish(latest)
     }
 
     private fun showUnavailable(message: String) {
+        frameValidity.invalidate()
+        resetStability()
         latest = ArMeasurementFrame(message = message, dimensionIndex = measuredDimensions.size, automatic = automatic)
         publish(latest)
     }

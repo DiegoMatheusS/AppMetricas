@@ -327,7 +327,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
             automatic.setTextColor(if (frame.automatic) ink else Color.WHITE)
             manual.setTextColor(if (frame.automatic) Color.WHITE else ink)
         }
-        confirm.isEnabled = !saved && measurement != null
+        confirm.isEnabled = !saved && frame.canConfirm && measurement != null
         undo.isEnabled = frame.points.isNotEmpty() || (tankShape != null && frame.dimensionIndex > 0)
         clear.isEnabled = frame.points.isNotEmpty() || (tankShape != null && frame.dimensionIndex > 0)
     }
