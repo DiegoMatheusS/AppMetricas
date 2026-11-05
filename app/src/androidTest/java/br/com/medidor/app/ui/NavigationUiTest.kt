@@ -36,9 +36,18 @@ class NavigationUiTest {
         }
     }
 
-    private fun node(text: String): AccessibilityNodeInfo? =
-        InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow
-            ?.findAccessibilityNodeInfosByText(text)?.firstOrNull()
+    private fun node(text: String): AccessibilityNodeInfo? {
+        val root = InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow ?: return null
+        val pending = ArrayDeque<AccessibilityNodeInfo>()
+        pending.add(root)
+        while (pending.isNotEmpty()) {
+            val current = pending.removeFirst()
+            if (current.text?.toString()?.contains(text) == true ||
+                current.contentDescription?.toString()?.contains(text) == true) return current
+            for (index in 0 until current.childCount) current.getChild(index)?.let(pending::addLast)
+        }
+        return null
+    }
 
     private fun waitForText(text: String) {
         val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
