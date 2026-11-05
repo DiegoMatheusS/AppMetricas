@@ -1,6 +1,6 @@
 # AppMetricas — Medidor para Android
 
-Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estimadas por câmera, cálculo de reservatórios, modelagem arquitetônica assistida e captura guiada para futura reconstrução 3D.
+Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estimadas por câmera, cálculo de reservatórios, modelagem arquitetônica assistida e captura guiada e reconstrução parcial de superfícies 3D.
 
 **Estado:** em desenvolvimento, ainda não publicado na Play Store. Android 11 ou superior (API 30+).
 
@@ -87,6 +87,6 @@ O GitHub Actions executa a compilação e os testes automatizados a cada atualiz
 
 1. Evoluir o contorno aproximado no vídeo ao vivo para rastreamento mais estável, com calibração dinâmica ou profundidade confiável antes de mostrar medidas físicas.
 2. Melhorias na importação e identificação de paredes e aberturas de plantas, com suporte progressivo a outros formatos arquitetônicos.
-3. Preparar o Scanner 3D para calibração das câmeras, triangulação e reconstrução geométrica offline, após validação com fotografias reais.
+3. Validar a reconstrução do Scanner 3D com fotografias reais e melhorar a calibração e a densidade das superfícies.
 4. Reforçar persistência, restauração de backups e testes instrumentados em Android.
 5. Validar a contagem assistida de peças rotacionadas ou encostadas e implementar o desbloqueio real do Pro Completo.
