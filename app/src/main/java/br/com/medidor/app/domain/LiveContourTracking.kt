@@ -37,6 +37,18 @@ object LiveContourTracking {
         else NormalizedPoint((left+right)/2,(top+bottom)/2)
     }
 
+    /** Intersection over union of the two normalized bounding boxes. */
+    internal fun overlap(previous: PlanarContourResult?, current: PlanarContourResult): Double {
+        if (previous == null) return 0.0
+        val left = maxOf(previous.minX.toDouble() / previous.width, current.minX.toDouble() / current.width)
+        val right = minOf((previous.maxX + 1.0) / previous.width, (current.maxX + 1.0) / current.width)
+        val top = maxOf(previous.minY.toDouble() / previous.height, current.minY.toDouble() / current.height)
+        val bottom = minOf((previous.maxY + 1.0) / previous.height, (current.maxY + 1.0) / current.height)
+        val intersection = (right - left).coerceAtLeast(0.0) * (bottom - top).coerceAtLeast(0.0)
+        return intersection / (previous.widthFraction * previous.heightFraction +
+            current.widthFraction * current.heightFraction - intersection)
+    }
+
     fun check(previous: PlanarContourResult?, current: PlanarContourResult?): LiveContourState {
         if (current == null) return LiveContourState(null, "Região não encontrada; toque novamente no objeto.")
         val areaFraction = current.pixelsInside.toDouble() / (current.width * current.height)
@@ -52,5 +64,31 @@ object LiveContourTracking {
         if (move > .18 || ratio !in .45..2.2)
             return LiveContourState(null, "Contorno instável; selecione novamente o objeto.")
         return LiveContourState(current, "Contorno aproximado atualizado.")
+    }
+}
+
+/** One analyzer thread owns this state. A brief miss keeps the target, never its old overlay. */
+internal class LiveContourStabilizer {
+    var previous: PlanarContourResult? = null
+        private set
+    private var pending: PlanarContourResult? = null
+    private var misses = 0
+
+    fun update(candidate: LiveContourState, automatic: Boolean): LiveContourState {
+        val result = candidate.result
+        if (result == null) {
+            pending = null
+            if (++misses >= 3) previous = null
+            return candidate
+        }
+
+        misses = 0
+        if (automatic && previous == null && LiveContourTracking.overlap(pending, result) < .25) {
+            pending = result
+            return LiveContourState(null, "Confirmando o contorno. Mantenha a câmera firme.")
+        }
+        previous = result
+        pending = null
+        return candidate
     }
 }

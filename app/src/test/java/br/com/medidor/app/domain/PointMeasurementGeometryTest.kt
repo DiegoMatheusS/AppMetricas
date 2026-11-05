@@ -36,6 +36,15 @@ class PointMeasurementGeometryTest {
             NormalizedPoint(.9f,.9f)
         ),100,100))
     }
+    @Test fun areaInArUsesMetersOnTheSurfaceAndRejectsCrossedCorners() {
+        val corners = listOf(0.0 to 0.0, 2.5 to 0.0, 2.5 to -0.6, 0.0 to -0.6)
+        assertEquals(1.5, PointMeasurementGeometry.polygonAreaSquareMeters(corners)!!, .0001)
+        assertEquals(1.5, PointMeasurementGeometry.polygonAreaSquareMeters(corners.reversed())!!, .0001)
+        assertNull(PointMeasurementGeometry.polygonAreaSquareMeters(
+            listOf(corners[0], corners[2], corners[1], corners[3])
+        ))
+    }
+
     @Test fun invalidReferenceCannotProduceArea() {
         assertNull(PointMeasurementGeometry.areaSquareMillimeters(100.0,100.0,0.0))
         assertNull(PointMeasurementGeometry.polygonAreaPixels2(emptyList(),100,100))

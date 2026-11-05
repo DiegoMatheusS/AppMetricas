@@ -1,5 +1,9 @@
 package br.com.medidor.app.ui
 
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
@@ -113,7 +118,28 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
     var densityText by rememberSaveable { mutableStateOf("") }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var diameterFromAr by rememberSaveable { mutableStateOf(false) }
+    var sizeFromAr by rememberSaveable { mutableStateOf(false) }
+    val arLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { outcome ->
+        val data = outcome.data
+        if (outcome.resultCode == Activity.RESULT_OK && data != null &&
+            data.getStringExtra(ArMeasurementActivity.EXTRA_SHAPE) == shape) {
+            val values = data.getDoubleArrayExtra(ArMeasurementActivity.EXTRA_DIMENSIONS)
+            val expected = if (shape == TankShape.SPHERE.name) 1 else 2
+            if (values != null && values.size == expected && values.all { it.isFinite() && it > 0.0 }) {
+                diameter = String.format(Locale.US, "%.3f", values[0]).replace('.', ',')
+                diameterFromAr = true
+                if (expected == 2) {
+                    size = String.format(Locale.US, "%.3f", values[1]).replace('.', ',')
+                    sizeFromAr = true
+                }
+                saved = false
+            }
+        }
+    }
     val selected = TankShape.valueOf(shape)
+    val fromAr = diameterFromAr || (selected != TankShape.SPHERE && sizeFromAr)
     val d = parseDimension(diameter)
     val s = if (selected == TankShape.SPHERE) d else parseDimension(size)
     val levelValue = parseLevel(level)
@@ -123,6 +149,8 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
         TankFillInput.heightMeters(levelValue, unit, maxLevel) else null
     val valid = d != null && s != null && lv != null
     val result = if (valid) TankCalculator.calculate(selected, d!!, s!!, lv!!) else null
+    val capacity = result?.capacityM3 ?: if (d != null && s != null)
+        TankCalculator.calculate(selected, d, s, 0.0).capacityM3 else null
     val density = densityText.trim().replace(',', '.').toDoubleOrNull()
     val densityValid = densityText.isBlank() ||
         (density != null && density.isFinite() && density in 0.01..30000.0)
@@ -136,26 +164,18 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
             .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onCamera,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFE7EAE4), contentColor = ink)
-            ) { Text("Câmera") }
-            Button(
-                onClick = {},
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White, contentColor = ink)
-            ) { Text("Manual") }
-        }
         Text("Escolha o formato do tanque",
             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
         TankIllustrationPicker(
             selected = TankIllustration.valueOf(illustration),
             onSelect = { option ->
                 illustration = option.name
+                if (shape != option.geometry.name) {
+                    if (diameterFromAr) diameter = ""
+                    if (sizeFromAr) size = ""
+                    diameterFromAr = false
+                    sizeFromAr = false
+                }
                 shape = option.geometry.name
                 saved = false
             }
@@ -174,6 +194,18 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
                 )
             }
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { arLauncher.launch(ArMeasurementActivity.intent(context, shape = selected)) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = lime, contentColor = ink)
+            ) { Text("Medir em AR") }
+            Button(
+                onClick = onCamera,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE7EAE4), contentColor = ink)
+            ) { Text("Ver contorno") }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Unidade de medida", style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF737C73))
@@ -181,15 +213,17 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
                 fontWeight = FontWeight.SemiBold)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DimensionField("Diâmetro interno (m)", diameter, Modifier.weight(1f)) {
-                diameter = it; saved = false
+            DimensionField(if (diameterFromAr) "Diâmetro AR (m)" else "Diâmetro interno (m)",
+                diameter, Modifier.weight(1f)) {
+                diameter = it; diameterFromAr = false; saved = false
             }
             if (selected != TankShape.SPHERE) {
                 DimensionField(
-                    if (selected == TankShape.VERTICAL) "Altura útil (m)"
-                    else "Comprimento (m)",
+                    if (selected == TankShape.VERTICAL) {
+                        if (sizeFromAr) "Altura AR (m)" else "Altura útil (m)"
+                    } else if (sizeFromAr) "Comprimento AR (m)" else "Comprimento (m)",
                     size, Modifier.weight(1f)
-                ) { size = it; saved = false }
+                ) { size = it; sizeFromAr = false; saved = false }
             }
         }
         Card(
@@ -204,16 +238,17 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
                 Text("CAPACIDADE TOTAL", fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.7f))
                 Text(
-                    if (result != null) "${decimal(result.capacityM3)} m³"
+                    if (capacity != null) "${decimal(capacity)} m³"
                     else "— m³",
                     color = lime, fontSize = 30.sp, fontWeight = FontWeight.Medium
                 )
                 Text(
-                    if (result != null) "${decimal(Geometry.liters(result.capacityM3))} litros"
+                    if (capacity != null) "${decimal(Geometry.liters(capacity))} litros"
                     else "Informe as dimensões internas",
                     style = MaterialTheme.typography.bodyMedium, color = Color.White
                 )
-                Text("Capacidade geométrica estimada, não volume atual do líquido.",
+                Text(if (fromAr) "Estimativa com dimensões de câmera. Use medidas internas para a capacidade útil."
+                    else "Capacidade geométrica estimada, não volume atual do líquido.",
                     color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
             }
         }
@@ -264,7 +299,8 @@ fun TankCalculatorScreen(onSave: (String, String) -> Unit, onCamera: () -> Unit 
         Button(
             enabled = valid && densityValid,
             onClick = {
-                onSave(selected.label, "Capacidade: ${decimal(result!!.capacityM3)} m³ | " +
+                onSave(selected.label, (if (fromAr) "Capacidade estimada em AR: " else "Capacidade: ") +
+                    "${decimal(result!!.capacityM3)} m³ | " +
                     "Produto: ${decimal(result.occupiedM3)} m³ | Nível: ${decimal(lv!!)} m" +
                     (if (productMass != null)
                         " | Massa: ${decimal(productMass)} kg" else ""))

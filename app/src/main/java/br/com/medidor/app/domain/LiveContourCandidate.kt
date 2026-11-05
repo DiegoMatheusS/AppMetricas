@@ -68,27 +68,31 @@ object LiveContourCandidate {
                 abs(sx!! - cx) + abs(sy!! - cy)
             }
         } else {
-            // Preserve tracking of a previous object instead of changing the
-            // selection whenever another component becomes slightly larger.
-            val tracked = if (previous != null) regions
-                .map { it to fromRegion(it, width, height) }
-                .firstOrNull { (_, result) ->
-                    LiveContourTracking.check(previous, result).result != null
-                }?.first else null
-            tracked ?: regions
-                .filter { it.area.toDouble() / (width * height) in .002..0.45 }
-                .maxByOrNull { region ->
+            val candidates = regions.filter { region ->
+                region.area.toDouble() / (width * height) in .002..0.45 &&
+                    ContourVisualQuality.assess(fromRegion(region, width, height), bounds = bounds)
+                        .rating != ContourVisualRating.LOW
+            }
+            if (previous != null) {
+                candidates.map { region -> region to fromRegion(region, width, height) }
+                    .filter { (_, result) -> LiveContourTracking.check(previous, result).result != null }
+                    .map { (region, result) -> region to LiveContourTracking.overlap(previous, result) }
+                    .maxByOrNull { (_, overlap) -> overlap }
+                    ?.takeIf { (_, overlap) -> overlap >= .15 }?.first
+            } else {
+                candidates.maxByOrNull { region ->
                     val cx = (region.left + region.right) / 2.0 / width
                     val cy = (region.top + region.bottom) / 2.0 / height
                     region.area.toDouble() *
                         (1.0 - .75 * (abs(cx - .5) + abs(cy - .5)).coerceAtMost(1.0))
                 }
+            }
         }
 
         if (chosen != null) {
             val candidate = fromRegion(chosen, width, height)
-            val checked = LiveContourTracking.check(previous, candidate)
-            if (checked.result != null) {
+            if (LiveContourTracking.check(previous, candidate).result != null &&
+                ContourVisualQuality.assess(candidate, bounds = bounds).rating != ContourVisualRating.LOW) {
                 return LiveContourState(candidate,
                     if (seed == null) "Contorno automático aproximado. Confira as bordas."
                     else "Região selecionada encontrada. Confira as bordas.")
