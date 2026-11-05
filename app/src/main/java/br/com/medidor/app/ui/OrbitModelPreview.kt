@@ -90,8 +90,8 @@ internal fun MeshModelPreview(faces: List<ModelFace>, showLines: Boolean = true)
                 val midX = (minX + maxX) / 2
                 val midY = (minY + maxY) / 2
                 val firstFloor = listOf(
-                    Color(0xFF4E9DB3), Color(0xFF3F8097), Color(0xFF6AAEC0),
-                    Color(0xFF36758E), Color(0xFF8FC5D0), Color(0xFF34697C)
+                    Color(0xFFC5D1BC), Color(0xFFA9BAA0), Color(0xFFD9E2D2),
+                    Color(0xFF93A58B), Color(0xFFE3EADA), Color(0xFF879C7F)
                 )
                 val secondFloor = listOf(
                     Color(0xFF91B7A1), Color(0xFF6F9C82), Color(0xFFA3C8AF),

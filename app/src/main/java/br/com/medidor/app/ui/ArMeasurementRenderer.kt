@@ -70,6 +70,7 @@ internal class ArMeasurementRenderer(
     }
 
     fun undo() {
+        automatic = false
         if (areaMode && corners.size > 1) {
             corners.removeAt(corners.lastIndex)
         } else {

@@ -311,12 +311,15 @@ internal class ArMeasurementActivity : ComponentActivity() {
         val visibility = if (caption.isEmpty()) View.GONE else View.VISIBLE
         if (result.visibility != visibility) result.visibility = visibility
         if (automatic.isEnabled == frame.automatic) {
-        automatic.isEnabled = !frame.automatic
-        manual.isEnabled = frame.automatic
-        automatic.backgroundTintList = ColorStateList.valueOf(if (frame.automatic) Color.rgb(192, 245, 101) else Color.rgb(38, 57, 46))
-        manual.backgroundTintList = ColorStateList.valueOf(if (!frame.automatic) Color.rgb(192, 245, 101) else Color.rgb(38, 57, 46))
-        automatic.setTextColor(if (frame.automatic) Color.rgb(20, 37, 31) else Color.WHITE)
-        manual.setTextColor(if (!frame.automatic) Color.rgb(20, 37, 31) else Color.WHITE)
+            automatic.isEnabled = !frame.automatic
+            manual.isEnabled = frame.automatic
+            val activeColor = Color.rgb(192, 245, 101)
+            val inactiveColor = Color.rgb(38, 57, 46)
+            val ink = Color.rgb(20, 37, 31)
+            automatic.backgroundTintList = ColorStateList.valueOf(if (frame.automatic) activeColor else inactiveColor)
+            manual.backgroundTintList = ColorStateList.valueOf(if (frame.automatic) inactiveColor else activeColor)
+            automatic.setTextColor(if (frame.automatic) ink else Color.WHITE)
+            manual.setTextColor(if (frame.automatic) Color.WHITE else ink)
         }
         confirm.isEnabled = !saved && measurement != null
         undo.isEnabled = frame.points.isNotEmpty()

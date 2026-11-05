@@ -29,7 +29,7 @@ data class ScannerSession(
 }
 
 /**
- * Keeps capture sessions in app-private storage; the prototype has no 3D solver.
+ * Keeps capture sessions in app-private storage and retains the original photographs.
  * Photos are unique to their slots. No image is uploaded or sent to third parties.
  */
 class ScannerSessionStore(context: Context) {
