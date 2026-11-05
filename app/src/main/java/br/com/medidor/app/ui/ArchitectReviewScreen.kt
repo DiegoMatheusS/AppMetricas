@@ -108,6 +108,9 @@ fun ArchitectReviewScreen(onBack: () -> Unit, onEdit: () -> Unit, onScan: () -> 
                 modifier = Modifier.padding(top = 12.dp)
             )
         }
+        if (bitmap != null && !view3d) {
+            PlanRecognitionControls(bitmap, floor, onApply = ::updateFloor)
+        }
         if (!view3d) {
             Text("Planta capturada", fontSize = 12.sp, color = ink,
                 fontWeight = FontWeight.Medium)

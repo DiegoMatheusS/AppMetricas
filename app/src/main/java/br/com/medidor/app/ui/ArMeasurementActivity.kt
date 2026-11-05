@@ -3,6 +3,7 @@ package br.com.medidor.app.ui
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
@@ -56,6 +57,8 @@ internal class ArMeasurementActivity : ComponentActivity() {
     private lateinit var confirm: Button
     private lateinit var undo: Button
     private lateinit var clear: Button
+    private lateinit var automatic: Button
+    private lateinit var manual: Button
     private var session: Session? = null
     private var running = false
     private var askedForInstall = false
@@ -108,6 +111,24 @@ internal class ArMeasurementActivity : ComponentActivity() {
             })
             status = label(15f).apply { text = "Preparando a câmera em AR…" }
             addView(status)
+            addView(LinearLayout(context).apply modes@{
+                automatic = Button(context).apply {
+                    text = "Automático"
+                    setOnClickListener {
+                        saved = false
+                        surface.queueEvent { renderer.setAutomatic(true) }
+                    }
+                }
+                manual = Button(context).apply {
+                    text = "Marcar pontos"
+                    setOnClickListener {
+                        saved = false
+                        surface.queueEvent { renderer.setAutomatic(false) }
+                    }
+                }
+                addView(automatic, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(manual, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            })
         }
         root.addView(header, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
 
@@ -116,10 +137,13 @@ internal class ArMeasurementActivity : ComponentActivity() {
             addView(result)
             if (tankShape != null) {
                 addView(label(13f).apply {
-                    text = "Marque os extremos do tanque. Medidas externas geram uma estimativa."
+                    text = "Enquadre o tanque inteiro e alinhe a câmera. Confira a medida encontrada antes de confirmar."
                 })
             }
             confirm = Button(context).apply {
+                backgroundTintList = ColorStateList.valueOf(Color.rgb(192, 245, 101))
+                setTextColor(Color.rgb(20, 37, 31))
+                isAllCaps = false
                 isEnabled = false
                 text = if (tankShape == null) "Salvar medição" else "Confirmar dimensão"
                 setOnClickListener {
@@ -132,6 +156,9 @@ internal class ArMeasurementActivity : ComponentActivity() {
                 fun addAction(name: String, action: () -> Unit): Button =
                     Button(context).apply {
                         text = name
+                        isAllCaps = false
+                        backgroundTintList = ColorStateList.valueOf(Color.rgb(38, 57, 46))
+                        setTextColor(Color.WHITE)
                         setOnClickListener { action() }
                         this@actions.addView(this, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                     }
@@ -139,7 +166,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
                     saved = false
                     surface.queueEvent { renderer.undo() }
                 }
-                clear = addAction("Limpar") {
+                clear = addAction("Refazer") {
                     saved = false
                     surface.queueEvent { renderer.clear() }
                 }
@@ -283,6 +310,14 @@ internal class ArMeasurementActivity : ComponentActivity() {
         if (result.text != caption) result.text = caption
         val visibility = if (caption.isEmpty()) View.GONE else View.VISIBLE
         if (result.visibility != visibility) result.visibility = visibility
+        if (automatic.isEnabled == frame.automatic) {
+        automatic.isEnabled = !frame.automatic
+        manual.isEnabled = frame.automatic
+        automatic.backgroundTintList = ColorStateList.valueOf(if (frame.automatic) Color.rgb(192, 245, 101) else Color.rgb(38, 57, 46))
+        manual.backgroundTintList = ColorStateList.valueOf(if (!frame.automatic) Color.rgb(192, 245, 101) else Color.rgb(38, 57, 46))
+        automatic.setTextColor(if (frame.automatic) Color.rgb(20, 37, 31) else Color.WHITE)
+        manual.setTextColor(if (!frame.automatic) Color.rgb(20, 37, 31) else Color.WHITE)
+        }
         confirm.isEnabled = !saved && measurement != null
         undo.isEnabled = frame.points.isNotEmpty()
         clear.isEnabled = frame.points.isNotEmpty()

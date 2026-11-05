@@ -13,7 +13,8 @@ data class PieceAppearance(
     val fillRatio: Double,
     val red: Int,
     val green: Int,
-    val blue: Int
+    val blue: Int,
+    val area: Double = 0.0
 )
 
 object SimilarObjectCounter {
@@ -24,11 +25,12 @@ object SimilarObjectCounter {
         val h = region.bottom - region.top + 1
         if (w <= 0 || h <= 0) return null
         return PieceAppearance(
-            aspectRatio = w.toDouble() / h,
-            fillRatio = region.area.toDouble() / (w * h),
+            aspectRatio = region.principalAspect ?: max(w.toDouble() / h, h.toDouble() / w),
+            fillRatio = region.shapeFill ?: (region.area.toDouble() / (w * h)),
             red = region.meanRed,
             green = region.meanGreen,
-            blue = region.meanBlue
+            blue = region.meanBlue,
+            area = region.area.toDouble()
         )
     }
 

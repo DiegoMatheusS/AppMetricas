@@ -136,6 +136,7 @@ class ScannerSessionStore(context: Context) {
         val session = sessions.firstOrNull { it.id == id }
             ?: throw IllegalArgumentException("Sessão não encontrada.")
         persist(sessions.filterNot { it.id == id })
+        ScannerMeshStore(appContext).delete(id)
         session.frames.values.forEach { safeFile(it)?.delete() }
     }
 

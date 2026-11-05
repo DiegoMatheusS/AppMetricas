@@ -10,7 +10,7 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Captura de fotografia com CameraX ou importação da galeria.
 - Distância por marcação manual de pontos, com escala calibrada por referência física no **mesmo plano**. Permite calibração por moeda brasileira ou distância conhecida (mm, cm, m).
 - **Contorno experimental por toque na fotografia:** seleciona uma região com cor semelhante à do ponto tocado, destaca o contorno e estima largura e altura pela caixa delimitadora. Há três níveis de tolerância para ajustar a seleção.
-- **Régua e Área em AR:** em aparelhos compatíveis com ARCore, marque dois extremos para obter uma distância ou marque de 3 a 12 cantos na mesma superfície plana para calcular a área. Os pontos ficam ancorados no ambiente e as distâncias aparecem nas linhas. A medição por foto calibrada continua disponível.
+- **Régua e Área em AR:** em aparelhos compatíveis com ARCore, marque dois extremos para obter uma distância ou marque de 3 a 12 cantos na mesma superfície plana para calcular a área. A opção Automático encontra contornos por contraste e aguarda três quadros consistentes antes de ancorar a medida na superfície reconhecida. A opção Marcar pontos permite ajustar a seleção. Os pontos ficam ancorados no ambiente e as distâncias aparecem nas linhas. A medição por foto calibrada continua disponível.
 - **Contorno ao vivo na câmera (experimental):** busca automática com confirmação em quadros consecutivos. Você também pode tocar no objeto ou **delimitar a área** por dois cantos. A seleção por área restringe a busca para reduzir interferência de fundos semelhantes; permite redefinir a região e ajustar a tolerância de cor. O app informa **estabilidade visual heurística** e avisa se o contorno toca as bordas, está fragmentado ou oscila entre quadros. CameraX processa offline até cerca de quatro quadros por segundo e compartilha recorte/rotação com a prévia. Mostra largura e altura apenas como porcentagens do quadro, nunca centímetros sem calibração.
 - Histórico local dos resultados, exclusão individual com confirmação e exportação de relatório PDF A4.
 - Calculadora offline de caixas: volume, área de piso e área superficial.
@@ -20,7 +20,7 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 ### Tanques e produtos armazenados
 - Tanques cilíndricos verticais, horizontais e esféricos, modelados como sólidos geométricos ideais.
 - Calcula capacidade total, volume ocupado e volume livre em metros cúbicos e litros.
-- **Tanques em AR:** selecione o formato e marque dois extremos para cada dimensão solicitada na mesma sessão. A câmera pode se deslocar entre os pontos. A ferramenta requer profundidade ARCore e preenche a calculadora com as medidas confirmadas. Dimensões externas produzem uma estimativa geométrica.
+- **Tanques em AR:** selecione o formato e marque dois extremos para cada dimensão solicitada na mesma sessão. A opção automática procura as seções centrais do contorno para cada dimensão. A câmera pode se deslocar entre as medidas. A ferramenta requer profundidade ARCore e preenche a calculadora com as medidas confirmadas. Dimensões externas produzem uma estimativa geométrica.
 - Nível do líquido ou produto medido a partir do fundo, com entrada em **metros, centímetros ou percentual da altura interna**.
 - Massa estimada opcional, mediante densidade aparente informada em kg/m³.
 
@@ -30,13 +30,13 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Importação de imagens e páginas de PDF como referência visual para traçar plantas.
 - Importação de **DXF ASCII** com entidades `LINE` e `LWPOLYLINE` de segmentos retos. Permite visualizar as camadas (layers) e escolher **uma camada** para transformá-la em paredes editáveis; também é possível usar o desenho apenas como imagem de referência.
 - Para converter linhas DXF em paredes, exige escolher explicitamente a unidade física: mm, cm, m, polegadas ou pés. Há limite de 300 paredes por importação. Polilinhas curvas com `bulge` não são suportadas.
-- Calibração da escala; marcação e edição manual de paredes, portas e janelas; altura de paredes e até seis pavimentos por projeto.
+- Calibração da escala, reconhecimento assistido de paredes, portas e janelas em plantas retas, revisão das sugestões sobre a imagem e edição manual das marcações. Até seis pavimentos por projeto.
 - Zoom de precisão de até 6×, deslocamento da planta com dois dedos, correção manual de perspectiva para folhas planas e alinhamento entre andares por um ou dois pontos de referência.
 - Maquete geométrica **3D interativa**, com rotação e zoom. Exportação de geometria no formato **OBJ**, sem texturas ou propriedades BIM.
 - Até 20 projetos locais, com criação, duplicação, renomeação, seleção e exclusão confirmada.
 - Relatório PDF A4 do projeto e backup/restauração local em ZIP, incluindo plantas e histórico de medições.
 
-**Limitações:** importar PDF não identifica automaticamente paredes. Converter DXF depende da seleção correta da camada e das unidades; outras linhas da camada escolhida também poderão virar paredes. Não há suporte nativo para DWG, IFC ou RVT. A maquete é esquemática, não um projeto executivo nem um modelo BIM certificado. O backup é manual, não criptografado e não possui sincronização em nuvem.
+**Limitações:** o reconhecimento de paredes e aberturas usa contraste, linhas retas e intervalos na planta calibrada. As sugestões precisam ser revisadas. Converter DXF depende da seleção correta da camada e das unidades; outras linhas da camada escolhida também poderão virar paredes. Não há suporte nativo para DWG, IFC ou RVT. A maquete é esquemática, não um projeto executivo nem um modelo BIM certificado. O backup é manual, não criptografado e não possui sincronização em nuvem.
 
 ### Realidade aumentada (ARCore)
 - **AR na mesa:** posiciona a maquete em uma superfície horizontal detectada.
@@ -45,14 +45,16 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 
 **Limitação:** é uma função experimental, disponível apenas em aparelhos compatíveis com ARCore. A precisão da âncora, o reconhecimento da impressão e a estabilidade ainda precisam de validação em aparelho físico. A visualização não representa aferição de obra.
 
-### Scanner 3D — preparação das fotografias
+### Scanner 3D — fotografias e reconstrução
 - Captura guiada de **20 posições** (12 fotografias horizontais e 8 elevadas) por objeto, com câmera ou galeria.
 - Até oito sessões locais; permite trocar fotografias, acompanhar o progresso e renomear ou excluir sessões.
 - Exportação e importação de **cada sessão** em ZIP independente, com validação de integridade SHA-256.
 - Análise offline e aproximada de exposição, detalhes/contraste e possíveis fotografias muito semelhantes.
 - Comparação de pontos visuais entre fotos por descritores binários e RANSAC 2D; verificação experimental de coerência epipolar entre imagens.
 
-**Limitação importante:** ainda **não** reconstrói uma malha 3D, não calcula profundidade ou medidas tridimensionais e não recupera posições métricas das câmeras. Análises e correspondências são heurísticas ou experimentais, sujeitas a falsos positivos e negativos. O backup do Scanner é separado do backup do Modo Arquiteto.
+- Reconstrução offline por correspondências ORB, matriz essencial, recuperação de pose, triangulação e alinhamento progressivo das fotografias. A superfície parcial pode ser girada na prévia e exportada como OBJ.
+- O campo de visão horizontal informado configura a câmera estimada. O modelo tem escala proporcional, depende da sobreposição e textura do objeto e pode conter lacunas. As dimensões físicas exigem calibração externa. Fotografias insuficientes ou inconsistentes geram uma orientação para refazer a captura.
+- O modelo salvo acompanha as fotografias que o originaram. Alterar as fotos exige reconstruí-lo. O ZIP preserva as fotos para reconstrução posterior.
 
 ### Versão Pro
 Modelo comercial previsto: versão básica gratuita e um único **Pro Completo** por **R$ 129,90**, em pagamento único. **A compra e o desbloqueio ainda não estão implementados.** Não há assinatura obrigatória prevista.
@@ -60,7 +62,7 @@ Modelo comercial previsto: versão básica gratuita e um único **Pro Completo**
 ## Tecnologias e compilação
 
 - Android Gradle Plugin **9.2.1**; Gradle **9.4.1**; Kotlin embutido no AGP; Jetpack Compose BOM **2026.09.00**.
-- CameraX **1.6.2**, ARCore, OpenGL ES 2.0 e Java **17**.
+- CameraX **1.6.2**, ARCore, OpenCV **4.13.0**, OpenGL ES 2.0 e Java **17**.
 - `compileSdk 37`, `targetSdk 36`, `minSdk 30`.
 
 No Android Studio, abra a pasta do projeto, instale o Android SDK 37 e sincronize o Gradle.
@@ -87,4 +89,4 @@ O GitHub Actions executa a compilação e os testes automatizados a cada atualiz
 2. Melhorias na importação e identificação de paredes e aberturas de plantas, com suporte progressivo a outros formatos arquitetônicos.
 3. Preparar o Scanner 3D para calibração das câmeras, triangulação e reconstrução geométrica offline, após validação com fotografias reais.
 4. Reforçar persistência, restauração de backups e testes instrumentados em Android.
-5. Implementar a contagem assistida de objetos e o desbloqueio real do Pro Completo.
+5. Validar a contagem assistida de peças rotacionadas ou encostadas e implementar o desbloqueio real do Pro Completo.

@@ -578,6 +578,7 @@ fun ArchitectScreen() {
             style = MaterialTheme.typography.bodySmall)
         val bitmap = remember(current.imageFile) { repository.readImage(current.imageFile) }
         if (bitmap != null) {
+            PlanRecognitionControls(bitmap, current, onApply = ::editFloor)
             Text("Escala: informe uma medida conhecida na planta (metros).")
             OutlinedTextField(
                 value = referenceText,

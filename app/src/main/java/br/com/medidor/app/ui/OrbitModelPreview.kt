@@ -35,6 +35,11 @@ import kotlin.math.sin
 @Composable
 fun OrbitModelPreview(plan: ArchitectPlan, allFloors: Boolean, showLines: Boolean) {
     val faces = remember(plan, allFloors) { Architect3dGeometry.model(plan, allFloors) }
+    MeshModelPreview(faces, showLines)
+}
+
+@Composable
+internal fun MeshModelPreview(faces: List<ModelFace>, showLines: Boolean = true) {
     var yaw by remember { mutableStateOf(.75f) }
     var elevation by remember { mutableStateOf(.65f) }
     var zoom by remember { mutableStateOf(1f) }
@@ -42,7 +47,7 @@ fun OrbitModelPreview(plan: ArchitectPlan, allFloors: Boolean, showLines: Boolea
         Text("Arraste para girar • use dois dedos para aproximar ou afastar")
         Canvas(
             Modifier.fillMaxWidth().height(340.dp)
-                .background(Color(0xFFE9F0F3))
+                .background(Color(0xFFEDF1E8))
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, scale, rotation ->
                         yaw += rotation + pan.x * .007f

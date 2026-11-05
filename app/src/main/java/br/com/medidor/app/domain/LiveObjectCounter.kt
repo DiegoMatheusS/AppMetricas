@@ -5,7 +5,9 @@ import kotlin.math.abs
 data class CountRegion(
     val left: Int, val top: Int, val right: Int, val bottom: Int, val area: Int,
     val outline: List<ContourPixel> = emptyList(),
-    val meanRed: Int = -1, val meanGreen: Int = -1, val meanBlue: Int = -1
+    val meanRed: Int = -1, val meanGreen: Int = -1, val meanBlue: Int = -1,
+    val principalAspect: Double? = null,
+    val shapeFill: Double? = null
 )
 
 /**
@@ -14,7 +16,7 @@ data class CountRegion(
  * colored objects may still count as a single region.
  */
 object LiveObjectCounter {
-    fun detect(pixels: IntArray, width: Int, height: Int, sensitivity: Int = 45): List<CountRegion> {
+    fun detect(pixels: IntArray, width: Int, height: Int, sensitivity: Int = 45, referenceArea: Double? = null): List<CountRegion> {
         require(width in 8..512 && height in 8..512 && pixels.size == width * height)
         require(sensitivity in 15..100)
         val rs = IntArray(256); val gs = IntArray(256); val bs = IntArray(256)
@@ -55,55 +57,45 @@ object LiveObjectCounter {
             mask[y * width + x] = neighbors >= 5
         }
 
-        val seen = BooleanArray(pixels.size)
-        val queue = IntArray(pixels.size)
-        val regions = ArrayList<CountRegion>()
-        val minArea = maxOf(24, pixels.size / 600)
-        for (start in mask.indices) {
-            if (!mask[start] || seen[start]) continue
-            var head = 0; var tail = 1; queue[0] = start; seen[start] = true
-            var minX = width; var minY = height; var maxX = 0; var maxY = 0
-            var redSum = 0L; var greenSum = 0L; var blueSum = 0L
-            while (head < tail) {
-                val index = queue[head++]
-                val x = index % width; val y = index / width
-                val pixel = pixels[index]
-                redSum += (pixel ushr 16) and 255
-                greenSum += (pixel ushr 8) and 255
-                blueSum += pixel and 255
-                minX = minOf(minX, x); maxX = maxOf(maxX, x)
-                minY = minOf(minY, y); maxY = maxOf(maxY, y)
-                fun visit(i: Int) {
-                    if (mask[i] && !seen[i]) { seen[i] = true; queue[tail++] = i }
-                }
-                if (x > 0) visit(index - 1)
-                if (x + 1 < width) visit(index + 1)
-                if (y > 0) visit(index - width)
-                if (y + 1 < height) visit(index + width)
-            }
-            val area = tail
-            val border = minX <= 2 || minY <= 2 || maxX >= width - 3 || maxY >= height - 3
-            if (border || area < minArea || area > pixels.size / 3 ||
-                maxX - minX < 3 || maxY - minY < 3) continue
-
-            // Only pixels belonging to this component may form its contour.
-            val component = BooleanArray(pixels.size)
-            for (i in 0 until tail) component[queue[i]] = true
-            val outline = ArrayList<ContourPixel>()
-            for (i in 0 until tail) {
-                val index = queue[i]
-                val x = index % width; val y = index / width
-                if (!component[index - 1] || !component[index + 1] ||
-                    !component[index - width] || !component[index + width]) {
-                    if (outline.size < 1600) outline.add(ContourPixel(x, y))
-                }
-            }
-            regions.add(CountRegion(minX,minY,maxX,maxY,area,outline,
-                (redSum / area).toInt(), (greenSum / area).toInt(),
-                (blueSum / area).toInt()))
+        val components = PieceSegmentation.components(mask, width, height)
+        val regions = components.flatMap { component ->
+            val parts = if (referenceArea != null)
+                PieceSegmentation.split(component, width, height, referenceArea) else listOf(component)
+            parts.mapNotNull { indices -> describe(indices, pixels, width, height) }
         }
+
         return regions.sortedByDescending { it.area }.take(100)
     }
+    private fun describe(indices: IntArray, pixels: IntArray, width: Int, height: Int): CountRegion? {
+        val minArea = maxOf(24, pixels.size / 600)
+        if (indices.size < minArea || indices.size > pixels.size / 3) return null
+        val left = indices.minOf { it % width }
+        val right = indices.maxOf { it % width }
+        val top = indices.minOf { it / width }
+        val bottom = indices.maxOf { it / width }
+        if (left <= 2 || top <= 2 || right >= width - 3 || bottom >= height - 3 ||
+            right - left < 3 || bottom - top < 3) return null
+        val membership = indices.toHashSet()
+        val outline = indices.filter { index ->
+            index - 1 !in membership || index + 1 !in membership ||
+                index - width !in membership || index + width !in membership
+        }.take(1600).map { ContourPixel(it % width, it / width) }
+        val meanX = indices.sumOf { (it % width).toDouble() } / indices.size
+        val meanY = indices.sumOf { (it / width).toDouble() } / indices.size
+        val xx = indices.sumOf { val dx = it % width - meanX; dx * dx } / indices.size
+        val yy = indices.sumOf { val dy = it / width - meanY; dy * dy } / indices.size
+        val xy = indices.sumOf { (it % width - meanX) * (it / width - meanY) } / indices.size
+        val delta = kotlin.math.sqrt((xx - yy) * (xx - yy) + 4 * xy * xy)
+        val major = (xx + yy + delta) / 2
+        val minor = (xx + yy - delta) / 2
+        val aspect = kotlin.math.sqrt(major / minor.coerceAtLeast(.01))
+        val fill = indices.size / (12 * kotlin.math.sqrt((xx * yy - xy * xy).coerceAtLeast(.01)))
+        return CountRegion(left, top, right, bottom, indices.size, outline,
+            (indices.sumOf { (pixels[it] ushr 16) and 255 } / indices.size),
+            (indices.sumOf { (pixels[it] ushr 8) and 255 } / indices.size),
+            (indices.sumOf { pixels[it] and 255 } / indices.size), aspect, fill.coerceIn(0.0, 1.0))
+    }
+
 }
 
 /** Debounces fleeting count changes. Never claims accuracy or tracks identities. */

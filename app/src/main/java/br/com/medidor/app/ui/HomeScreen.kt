@@ -229,7 +229,8 @@ private fun HomeNavItem(
 @Composable
 fun MoreToolsScreen(onOpen: (Destination) -> Unit) {
     Column(
-        Modifier.fillMaxSize().background(HomeBackground).padding(20.dp),
+        Modifier.fillMaxSize().background(HomeBackground)
+            .verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp)
     ) {
         Text("Ferramentas e ajustes", style = MaterialTheme.typography.headlineSmall,
