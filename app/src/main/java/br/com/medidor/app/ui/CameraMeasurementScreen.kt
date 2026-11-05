@@ -1,6 +1,7 @@
 package br.com.medidor.app.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Paint
@@ -31,7 +32,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -71,6 +74,8 @@ import br.com.medidor.app.domain.PlanarContourSegmentation
 import br.com.medidor.app.domain.PointMeasurementGeometry
 import br.com.medidor.app.domain.PlanarContourResult
 import br.com.medidor.app.domain.ReferenceMarkQuality
+import br.com.medidor.app.domain.TankShape
+import br.com.medidor.app.domain.TankCameraCapture
 import java.io.File
 import kotlin.math.min
 
@@ -85,17 +90,35 @@ fun CameraMeasurementScreen(
     liveTool: LiveMeasureTool = LiveMeasureTool.RULER,
     onBack: () -> Unit = {},
     onManual: () -> Unit = {},
-    onSwitchTool: (LiveMeasureTool) -> Unit = {}
+    onSwitchTool: (LiveMeasureTool) -> Unit = {},
+    onTankArResult: (TankCameraCapture) -> Unit = {}
 ) {
     val context = LocalContext.current
     var arLaunchRequested by remember { mutableStateOf(false) }
     var arOpen by rememberSaveable { mutableStateOf(false) }
-    val arLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    var chooseTankShape by remember { mutableStateOf(false) }
+    var tankShapeForAr by remember { mutableStateOf<TankShape?>(null) }
+    val arLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
         arOpen = false
+        if (liveTool == LiveMeasureTool.TANK && result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val shape = TankShape.entries.firstOrNull {
+                it.name == data?.getStringExtra(ArMeasurementActivity.EXTRA_SHAPE)
+            }
+            val measurements = data?.getDoubleArrayExtra(
+                ArMeasurementActivity.EXTRA_DIMENSIONS
+            )?.toList()
+            if (shape != null && measurements != null) {
+                val captured = TankCameraCapture(shape, measurements).validated()
+                if (captured != null) onTankArResult(captured)
+            }
+        }
     }
     fun openAr() {
         if (liveTool == LiveMeasureTool.TANK) {
-            onManual()
+            chooseTankShape = true
         } else {
             arOpen = true
             arLaunchRequested = true
@@ -104,10 +127,41 @@ fun CameraMeasurementScreen(
     LaunchedEffect(arLaunchRequested) {
         if (arLaunchRequested) {
             arLaunchRequested = false
-            arLauncher.launch(ArMeasurementActivity.intent(context, area = liveTool == LiveMeasureTool.AREA))
+            arLauncher.launch(ArMeasurementActivity.intent(
+                context,
+                area = liveTool == LiveMeasureTool.AREA,
+                shape = if (liveTool == LiveMeasureTool.TANK) tankShapeForAr else null
+            ))
         }
     }
-    // Remove the CameraX preview before the ARCore activity opens the camera.
+    if (chooseTankShape) {
+        AlertDialog(
+            onDismissRequest = { chooseTankShape = false },
+            title = { Text("Qual é o formato do tanque?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Meça uma dimensão por vez enquanto caminha em volta do tanque. " +
+                        "A câmera precisa de profundidade ARCore. Confirme as dimensões " +
+                        "internas na calculadora.")
+                    TankShape.entries.forEach { shape ->
+                        OutlinedButton(
+                            onClick = {
+                                tankShapeForAr = shape
+                                chooseTankShape = false
+                                arOpen = true
+                                arLaunchRequested = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(shape.label) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { chooseTankShape = false }) { Text("Cancelar") }
+            }
+        )
+    }
+    // Remove CameraX preview while ARCore owns the camera.
     if (arOpen) return
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
