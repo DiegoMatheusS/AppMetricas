@@ -116,7 +116,8 @@ fun HomeScreen(
                     onClick = { onOpen(Destination.SCANNER) }
                 )
             }
-            Spacer(Modifier.height(27.dp))
+            if (records.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -128,7 +129,6 @@ fun HomeScreen(
                     Text("Ver tudo", fontSize = 12.sp, color = HomeMuted)
                 }
             }
-            if (records.isNotEmpty()) {
                 records.take(3).forEach { record ->
                     Row(
                         Modifier.fillMaxWidth().clickable { onOpen(Destination.HISTORY) }

@@ -90,7 +90,11 @@ internal class ArMeasurementRenderer(
     /** Coordinates are normalized in the actual camera View, independent of the GL buffer size. */
     fun requestPoint(x: Float, y: Float) { if (x in 0f..1f && y in 0f..1f) tap.set(PointF(x, y)) }
     fun requestMove(index: Int, x: Float, y: Float) {
-        if (x in 0f..1f && y in 0f..1f) edit.set(PointEdit(index,PointF(x,y)))
+        if (x in 0f..1f && y in 0f..1f) {
+            frameValidity.invalidate()
+            latest = latest.copy(canConfirm = false)
+            edit.set(PointEdit(index,PointF(x,y)))
+        }
     }
 
     fun setAutomatic(enabled: Boolean) {

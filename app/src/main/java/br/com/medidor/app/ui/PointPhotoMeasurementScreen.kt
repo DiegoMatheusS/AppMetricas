@@ -5,8 +5,8 @@ import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -47,7 +47,6 @@ internal fun PointPhotoMeasurementScreen(
     var unit by remember { mutableStateOf(LengthUnit.CENTIMETERS) }
     var saved by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var dragged by remember(photo) { mutableStateOf<Pair<Boolean,Int>?>(null) }
     val number = remember { NumberFormat.getNumberInstance(Locale.forLanguageTag("pt-BR")).apply { maximumFractionDigits = 2 } }
     fun length(mm: Double) = "${number.format(mm / 10)} cm"
     val span = if (reference.size == 2) PhotoCalibration.distancePixels(reference[0], reference[1], photo.width, photo.height) else null
@@ -83,41 +82,41 @@ internal fun PointPhotoMeasurementScreen(
             Image(photo.asImageBitmap(), "Fotografia fixa para medir", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             Canvas(Modifier.fillMaxSize().semantics { contentDescription = "Área de marcação da foto" }
                 .pointerInput(photo, scaleMm, areaMode) {
-                    detectTapGestures { touch ->
-                        val point = photoPointFromTouch(touch, size, photo.width, photo.height) ?: return@detectTapGestures
-                        val destination = if (scaleMm == null) reference else points
-                        val limit = if (scaleMm == null || !areaMode) 2 else 12
-                        if (destination.size >= limit) { notice = "Use Desfazer para alterar um ponto."; return@detectTapGestures }
-                        if (destination.any { PhotoCalibration.distancePixels(it, point, photo.width, photo.height) < 2 }) {
-                            notice = "Escolha um ponto diferente."; return@detectTapGestures
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        val rect = imageRect(size.width.toFloat(),size.height.toFloat(),photo.width,photo.height)
+                        val candidates = reference.indices.map { true to it } + points.indices.map { false to it }
+                        fun location(candidate: Pair<Boolean,Int>): Offset {
+                            val p = if (candidate.first) reference[candidate.second] else points[candidate.second]
+                            return Offset(rect.left+p.x*rect.width,rect.top+p.y*rect.height)
                         }
-                        destination.add(point); saved = false; notice = null
-                        if (scaleMm == null && reference.size == 2) scaleDialog = true
-                    }
-                }.pointerInput(photo,scaleMm,areaMode) {
-                    detectDragGestures(
-                        onDragStart = { touch ->
-                            val rect = imageRect(size.width.toFloat(),size.height.toFloat(),photo.width,photo.height)
-                            val candidates = reference.indices.map { true to it } + points.indices.map { false to it }
-                            dragged = candidates.minByOrNull { (isRef,index) ->
-                                val p = if (isRef) reference[index] else points[index]
-                                (Offset(rect.left+p.x*rect.width,rect.top+p.y*rect.height)-touch).getDistance()
-                            }?.takeIf { (isRef,index) ->
-                                val p = if (isRef) reference[index] else points[index]
-                                (Offset(rect.left+p.x*rect.width,rect.top+p.y*rect.height)-touch).getDistance() <= 28.dp.toPx()
-                            }
-                        },
-                        onDragEnd = { dragged = null },
-                        onDragCancel = { dragged = null }
-                    ) { change, _ ->
-                        val selected = dragged
-                        if (selected != null) {
+                        val selected = candidates.minByOrNull { (location(it)-down.position).getDistance() }
+                            ?.takeIf { (location(it)-down.position).getDistance() <= 28.dp.toPx() }
+                        var moved = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if ((change.position-down.position).getDistance() > if (selected == null) viewConfiguration.touchSlop else 1f) moved = true
                             val mapped = photoPointFromTouch(change.position,size,photo.width,photo.height)
-                            if (mapped != null) {
+                            if (selected != null && moved && mapped != null) {
                                 if (selected.first) reference[selected.second] = mapped else points[selected.second] = mapped
                                 saved = false; notice = null
+                                change.consume()
                             }
-                            change.consume()
+                            if (!change.pressed) {
+                                if (!moved && selected == null && mapped != null) {
+                                    val destination = if (scaleMm == null) reference else points
+                                    val limit = if (scaleMm == null || !areaMode) 2 else 12
+                                    if (destination.size < limit && destination.none {
+                                        PhotoCalibration.distancePixels(it,mapped,photo.width,photo.height) < 2
+                                    }) {
+                                        destination.add(mapped); saved = false; notice = null
+                                        if (scaleMm == null && reference.size == 2) scaleDialog = true
+                                    } else notice = "Arraste uma ponta existente para ajustar."
+                                } else if (!moved && selected != null) notice = "Arraste esta ponta para ajustar."
+                                break
+                            }
                         }
                     }
                 }) {
