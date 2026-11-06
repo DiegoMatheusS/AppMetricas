@@ -1,6 +1,7 @@
 package br.com.medidor.app.ui
 
 import android.Manifest
+import android.graphics.Bitmap
 import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.view.View
@@ -14,7 +15,10 @@ import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,6 +46,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +68,9 @@ import java.util.concurrent.atomic.AtomicReference
 private data class CountFrame(
     val width: Int,
     val height: Int,
-    val regions: List<CountRegion>
+    val regions: List<CountRegion>,
+    val pixels: IntArray,
+    val count: Int
 )
 
 /**
@@ -70,7 +79,7 @@ private data class CountFrame(
  * This is visual similarity, NOT a semantic class detector.
  */
 @Composable
-fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
+fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhoto: (Bitmap, List<Offset>) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val owner = context as? ComponentActivity
     val ink = Color(0xFF14251F)
@@ -90,6 +99,9 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
     var reference by remember { mutableStateOf<PieceAppearance?>(null) }
     var stableCount by remember { mutableStateOf<Int?>(null) }
     var saved by remember { mutableStateOf(false) }
+    var selectionNotice by remember { mutableStateOf<String?>(null) }
+    var frozenPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    val locked = remember { AtomicBoolean(false) }
 
     // Analysis and UI run on different threads; the reference is thread safe.
     val target = remember { AtomicReference<PieceAppearance?>(null) }
@@ -147,37 +159,48 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                 analysis.setAnalyzer(worker) { frame ->
                     try {
                         val now = SystemClock.elapsedRealtime()
-                        if (!disposed.get() && now - last >= 300) {
+                        if (!disposed.get() && !locked.get() && now - last >= 300) {
                             last = now
                             val sampled = LiveCameraFrameSampler.sample(frame)
                             if (sampled != null) {
+                                val version = generation.get()
+                                val exemplar = target.get()
                                 val regions = LiveObjectCounter.detect(
                                     sampled.pixels,
                                     sampled.width, sampled.height,
-                                    threshold.get(), reference = target.get()
+                                    threshold.get(), reference = exemplar
                                 )
-                                val version = generation.get()
                                 if (version != previousGeneration) {
                                     stabilizer.reset()
                                     previousGeneration = version
                                 }
-                                val exemplar = target.get()
-                                val detected = if (exemplar == null) null else
+                                val detected = if (exemplar == null) regions.size else
                                     SimilarObjectCounter.matches(exemplar, regions).size
-                                val confirmed = detected?.let { stabilizer.update(it) }
+                                val confirmed = stabilizer.update(detected)
                                 main.execute {
-                                    if (!disposed.get() && version == generation.get()) {
+                                    if (!disposed.get() && !locked.get() && version == generation.get()) {
                                         result = CountFrame(
-                                            sampled.width, sampled.height, regions
+                                            sampled.width, sampled.height, regions, sampled.pixels, detected
                                         )
-                                        stableCount = confirmed
+                                        stableCount = confirmed?.takeIf { it == detected }
+                                        if (confirmed == detected && detected > 0) {
+                                            frozenPhoto = Bitmap.createBitmap(sampled.pixels,sampled.width,sampled.height,Bitmap.Config.ARGB_8888)
+                                            locked.set(true)
+                                        }
+                                        error = null
                                     }
                                 }
-                            }
+                            } else main.execute { if (!disposed.get()) {
+                                stableCount = null
+                                error = "Não foi possível ler as cores desta câmera. Use Por foto para contar."
+                            } }
                         }
                     } catch (_: Exception) {
                         stabilizer.reset()
-                        main.execute { if (!disposed.get()) stableCount = null }
+                        main.execute { if (!disposed.get()) {
+                            stableCount = null
+                            error = "Não foi possível analisar esta imagem. Use Por foto para conferir a contagem."
+                        } }
                     } finally {
                         frame.close()
                     }
@@ -234,18 +257,22 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                     color = Color.White.copy(alpha = .7f), fontSize = 10.sp)
             }
             TextButton(onClick = {
+                locked.set(false)
+                frozenPhoto = null
+                result = null
                 reference = null
                 target.set(null)
                 generation.incrementAndGet()
                 stableCount = null
                 saved = false
             }) {
-                Text("Mudar peça", color = lime)
+                Text("Nova leitura", color = lime)
             }
         }
 
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             AndroidView(factory = { preview }, modifier = Modifier.fillMaxSize())
+            frozenPhoto?.let { Image(it.asImageBitmap(),"Imagem fixada dos objetos",Modifier.fillMaxSize(),contentScale = ContentScale.FillBounds) }
             Canvas(
                 Modifier.fillMaxSize().pointerInput(Unit) {
                     detectTapGestures { position ->
@@ -255,14 +282,24 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                             .coerceIn(0, frame.width - 1)
                         val y = (position.y * frame.height / size.height).toInt()
                             .coerceIn(0, frame.height - 1)
-                        val selected = SimilarObjectCounter.at(frame.regions, x, y)
+                        val selected = LiveObjectCounter.selectAt(frame.pixels, frame.width, frame.height, x, y, sensitivity)
+                            ?: SimilarObjectCounter.at(frame.regions, x, y)
                         val exemplar = selected?.let(SimilarObjectCounter::appearance)
                         if (exemplar != null) {
                             reference = exemplar
                             target.set(exemplar)
                             generation.incrementAndGet()
                             stableCount = null
+                            if (locked.get()) {
+                                val regions = LiveObjectCounter.detect(frame.pixels,frame.width,frame.height,sensitivity,reference = exemplar)
+                                val count = SimilarObjectCounter.matches(exemplar,regions).size
+                                result = CountFrame(frame.width,frame.height,regions,frame.pixels,count)
+                                stableCount = count
+                            }
                             saved = false
+                            selectionNotice = null
+                        } else {
+                            selectionNotice = "Peça não identificada neste ponto. Toque no centro dela ou use Conferir foto."
                         }
                     }
                 }
@@ -295,7 +332,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                 }
             }
             Text(
-                if (reference == null) "TOQUE EM UMA PEÇA PARA SELECIONAR O TIPO"
+                if (locked.get()) "IMAGEM FIXADA · NOVA LEITURA PARA ESCANEAR DE NOVO"
+                else if (reference == null) "CONTANDO OBJETOS · TOQUE PARA FILTRAR UMA PEÇA"
                 else "VERDE: PEÇAS VISUALMENTE SEMELHANTES",
                 color = Color.White,
                 fontSize = 11.sp,
@@ -307,11 +345,11 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
         }
 
         Column(
-            Modifier.fillMaxWidth().background(ink)
+            Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()).background(ink)
                 .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Peças do mesmo tipo visual",
+            Text(if (reference == null) "Objetos detectados" else "Peças do tipo selecionado",
                 color = Color.White, fontSize = 13.sp)
             Row(
                 Modifier.fillMaxWidth(),
@@ -320,20 +358,19 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
             ) {
                 Text(
                     when {
-                        reference == null -> "Selecione uma peça"
-                        stableCount == null -> "Analisando…"
+                        stableCount == null -> result?.count?.let { "$it (conferindo)" } ?: "Iniciando câmera…"
                         else -> stableCount.toString()
                     },
                     fontSize = if (stableCount != null) 38.sp else 21.sp,
                     color = lime, fontWeight = FontWeight.SemiBold
                 )
                 Button(
-                    enabled = reference != null && stableCount != null,
+                    enabled = stableCount != null && stableCount!! > 0 && !saved,
                     onClick = {
                         val count = stableCount ?: return@Button
                         onSave(
                             "Contagem de peças",
-                            "$count peças semelhantes (estimativa visual pela câmera)"
+                            "$count ${if (reference == null) "objetos detectados" else "peças semelhantes"} (estimativa visual pela câmera)"
                         )
                         saved = true
                     },
@@ -343,6 +380,14 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("Salvar contagem") }
             }
+            OutlinedButton(enabled = result != null, onClick = {
+                val frame = result ?: return@OutlinedButton
+                val pieces = reference?.let { SimilarObjectCounter.matches(it, frame.regions) } ?: frame.regions
+                onPhoto(Bitmap.createBitmap(frame.pixels, frame.width, frame.height, Bitmap.Config.ARGB_8888),
+                    pieces.map { Offset((it.left + it.right + 1f) / (2 * frame.width), (it.top + it.bottom + 1f) / (2 * frame.height)) })
+            }, modifier = Modifier.fillMaxWidth()) { Text("Conferir foto", color = lime) }
+            selectionNotice?.let { Text(it, color = lime, fontSize = 12.sp) }
+            if (stableCount == 0) Text("Nenhuma peça identificada. Separe as peças e use um fundo contrastante.",color = Color.White,fontSize = 12.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(
                     30 to "Sensível", 45 to "Normal", 65 to "Restrito"
@@ -351,6 +396,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }) {
                         enabled = sensitivity != choice,
                         onClick = {
                             sensitivity = choice
+                            locked.set(false)
+                            frozenPhoto = null
                             threshold.set(choice)
                             generation.incrementAndGet()
                             stableCount = null

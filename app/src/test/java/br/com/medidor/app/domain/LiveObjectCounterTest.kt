@@ -49,4 +49,30 @@ class LiveObjectCounterTest {
         for (y in 16..27) for (x in 0..10) pixels[y*w+x] = 0xFF000000.toInt()
         assertEquals(0,LiveObjectCounter.detect(pixels,w,h).size)
     }
+
+    @Test fun selectingAColorCountsPiecesAgainstAnUnevenBackground() {
+        val w = 100; val h = 80
+        val pixels = IntArray(w*h) { i ->
+            val gray = 50 + (i%w)*2
+            -0x1000000 or (gray shl 16) or (gray shl 8) or gray
+        }
+        for (y in 15..29) for (x in 12..26) pixels[y*w+x] = 0xFFEA2010.toInt()
+        for (y in 42..56) for (x in 66..80) pixels[y*w+x] = 0xFFDD2815.toInt()
+        val selected = LiveObjectCounter.selectAt(pixels,w,h,18,20)!!
+        val reference = SimilarObjectCounter.appearance(selected)!!
+        val pieces = LiveObjectCounter.detect(pixels,w,h,reference = reference)
+        assertEquals(2,SimilarObjectCounter.matches(reference,pieces).size)
+    }
+
+    @Test fun tappingAnEmptyBackgroundDoesNotSelectAnObject() {
+        val pixels = IntArray(80*60) { 0xFFFFFFFF.toInt() }
+        assertEquals(null,LiveObjectCounter.selectAt(pixels,80,60,40,30))
+    }
+
+    @Test fun aSingleLargePieceInsideTheImageIsCounted() {
+        val w = 100; val h = 80
+        val pixels = IntArray(w*h) { 0xFFFFFFFF.toInt() }
+        for (y in 10..69) for (x in 15..84) pixels[y*w+x] = 0xFF000000.toInt()
+        assertEquals(1,LiveObjectCounter.detect(pixels,w,h).size)
+    }
 }

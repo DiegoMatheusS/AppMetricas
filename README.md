@@ -10,7 +10,7 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Captura de fotografia com CameraX ou importação da galeria.
 - Distância por marcação manual de pontos, com escala calibrada por referência física no **mesmo plano**. Permite calibração por moeda brasileira ou distância conhecida (mm, cm, m).
 - **Contorno experimental por toque na fotografia:** seleciona uma região com cor semelhante à do ponto tocado, destaca o contorno e estima largura e altura pela caixa delimitadora. Há três níveis de tolerância para ajustar a seleção.
-- **Régua e Área em AR:** em aparelhos compatíveis com ARCore, marque dois extremos para obter uma distância ou marque de 3 a 12 cantos na mesma superfície plana para calcular a área. A opção Automático encontra contornos por contraste e aguarda três quadros consistentes antes de ancorar a medida na superfície reconhecida. A opção Marcar pontos permite ajustar a seleção. Os pontos ficam ancorados no ambiente e as distâncias aparecem nas linhas. A medição por foto calibrada continua disponível.
+- **Régua e Área:** o botão **Marcar pontos na foto** congela a imagem, solicita uma referência real e permite marcar extremos ou cantos. As medidas aparecem nas linhas em centímetros e as pontas podem ser arrastadas. **Medir no ambiente** oferece detecção automática ou marcação manual em aparelhos compatíveis com ARCore, mantendo os pontos ancorados no ambiente. Os contornos ao vivo ficam como opção nos ajustes.
 - **Contorno ao vivo na câmera (experimental):** busca automática com confirmação em quadros consecutivos. Você também pode tocar no objeto ou **delimitar a área** por dois cantos. A seleção por área restringe a busca para reduzir interferência de fundos semelhantes; permite redefinir a região e ajustar a tolerância de cor. O app informa **estabilidade visual heurística** e avisa se o contorno toca as bordas, está fragmentado ou oscila entre quadros. CameraX processa offline até cerca de quatro quadros por segundo e compartilha recorte/rotação com a prévia. Mostra largura e altura apenas como porcentagens do quadro, nunca centímetros sem calibração.
 - Histórico local dos resultados, exclusão individual com confirmação e exportação de relatório PDF A4.
 - Calculadora offline de caixas: volume, área de piso e área superficial.
@@ -55,6 +55,11 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Reconstrução offline por correspondências ORB, matriz essencial, recuperação de pose, triangulação e alinhamento progressivo das fotografias. A superfície parcial pode ser girada na prévia e exportada como OBJ.
 - O campo de visão horizontal informado configura a câmera estimada. O modelo tem escala proporcional, depende da sobreposição e textura do objeto e pode conter lacunas. As dimensões físicas exigem calibração externa. Fotografias insuficientes ou inconsistentes geram uma orientação para refazer a captura.
 - O modelo salvo acompanha as fotografias que o originaram. Alterar as fotos exige reconstruí-lo. O ZIP preserva as fotos para reconstrução posterior.
+
+### Contagem de peças
+- Mostra objetos detectados sem exigir uma seleção inicial. Tocar em uma peça filtra por aparência/cor.
+- Após confirmar a quantidade em quadros consecutivos, fixa a imagem e a contagem; **Nova leitura** inicia outro escaneamento.
+- **Conferir foto** permite adicionar e remover marcações antes de salvar. A identificação continua aproximada e depende da imagem; não recupera peças ocultas.
 
 ### Versão Pro
 Modelo comercial previsto: versão básica gratuita e um único **Pro Completo** por **R$ 129,90**, em pagamento único. **A compra e o desbloqueio ainda não estão implementados.** Não há assinatura obrigatória prevista.
