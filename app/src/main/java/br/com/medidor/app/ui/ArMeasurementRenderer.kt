@@ -91,7 +91,6 @@ internal class ArMeasurementRenderer(
     fun requestPoint(x: Float, y: Float) { if (x in 0f..1f && y in 0f..1f) tap.set(PointF(x, y)) }
     fun requestMove(index: Int, x: Float, y: Float) {
         if (x in 0f..1f && y in 0f..1f) {
-            frameValidity.invalidate()
             latest = latest.copy(canConfirm = false)
             edit.set(PointEdit(index,PointF(x,y)))
         }
@@ -165,7 +164,7 @@ internal class ArMeasurementRenderer(
     }
 
     fun measurement(): ArMeasurementFrame =
-        if (session != null && latest.canConfirm && frameValidity.canConfirm(SystemClock.elapsedRealtime())) latest
+        if (session != null && edit.get() == null && latest.canConfirm && frameValidity.canConfirm(SystemClock.elapsedRealtime())) latest
         else latest.copy(sides = emptyList(), area = null, canConfirm = false)
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
