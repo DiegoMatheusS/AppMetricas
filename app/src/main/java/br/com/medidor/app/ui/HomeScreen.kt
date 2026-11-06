@@ -68,17 +68,9 @@ fun HomeScreen(
                     Text("☷", fontSize = 22.sp, color = HomeInk)
                 }
             }
-            Spacer(Modifier.height(30.dp))
-            Text("Uma nova dimensão.\nNa sua câmera.",
-                fontSize = 30.sp, lineHeight = 35.sp,
-                fontWeight = FontWeight.Medium, color = HomeInk)
-            Spacer(Modifier.height(8.dp))
-            Text("Meça, calcule e transforme espaços.",
-                style = MaterialTheme.typography.bodyMedium, color = HomeMuted)
-            Spacer(Modifier.height(25.dp))
-
+            Spacer(Modifier.height(18.dp))
             Card(
-                modifier = Modifier.fillMaxWidth().height(146.dp)
+                modifier = Modifier.fillMaxWidth().height(110.dp)
                     .clickable { onOpen(Destination.RULER) },
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = HomeLime),
@@ -91,10 +83,8 @@ fun HomeScreen(
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.SpaceBetween) {
                         Text("♢", fontSize = 25.sp, color = HomeInk)
-                        Spacer(Modifier.height(17.dp))
                         Text("Régua e área", fontSize = 20.sp,
                             fontWeight = FontWeight.Medium, color = HomeInk)
-                        Text("Do ponto à medida.", fontSize = 12.sp, color = HomeInk)
                     }
                     Text("◢", fontSize = 62.sp, color = HomeInk,
                         modifier = Modifier.padding(end = 8.dp))
@@ -103,12 +93,12 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeToolCard(
-                    title = "Tanques", subtitle = "Capacidade e dimensões",
+                    title = "Tanques",
                     symbol = "▢", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.TANK_CAMERA) }
                 )
                 HomeToolCard(
-                    title = "Arquiteto", subtitle = "Da planta ao 3D",
+                    title = "Arquiteto",
                     symbol = "◇", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.ARCHITECT_SCAN) }
                 )
@@ -116,12 +106,12 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeToolCard(
-                    title = "Contar peças", subtitle = "Objetos iguais pela câmera",
+                    title = "Contar peças",
                     symbol = "◎", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.COUNT) }
                 )
                 HomeToolCard(
-                    title = "Scanner 3D", subtitle = "Digitalize objetos",
+                    title = "Scanner 3D",
                     symbol = "◈", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.SCANNER) }
                 )
@@ -138,11 +128,7 @@ fun HomeScreen(
                     Text("Ver tudo", fontSize = 12.sp, color = HomeMuted)
                 }
             }
-            if (records.isEmpty()) {
-                Text("Nenhuma medição salva por enquanto.",
-                    style = MaterialTheme.typography.bodySmall, color = HomeMuted,
-                    modifier = Modifier.padding(vertical = 20.dp))
-            } else {
+            if (records.isNotEmpty()) {
                 records.take(3).forEach { record ->
                     Row(
                         Modifier.fillMaxWidth().clickable { onOpen(Destination.HISTORY) }
@@ -185,12 +171,12 @@ fun HomeScreen(
 
 @Composable
 private fun HomeToolCard(
-    title: String, subtitle: String, symbol: String,
+    title: String, symbol: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Card(
-        modifier = modifier.height(142.dp).clickable(onClick = onClick),
+        modifier = modifier.height(110.dp).clickable(onClick = onClick),
         shape = RoundedCornerShape(17.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
@@ -205,8 +191,6 @@ private fun HomeToolCard(
             Column {
                 Text(title, color = HomeInk, fontWeight = FontWeight.Medium,
                     fontSize = 16.sp)
-                Spacer(Modifier.height(3.dp))
-                Text(subtitle, color = HomeMuted, fontSize = 11.sp)
             }
         }
     }

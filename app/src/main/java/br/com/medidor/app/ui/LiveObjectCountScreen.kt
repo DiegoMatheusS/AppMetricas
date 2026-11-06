@@ -15,6 +15,7 @@ import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -45,6 +46,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -97,6 +100,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
     var stableCount by remember { mutableStateOf<Int?>(null) }
     var saved by remember { mutableStateOf(false) }
     var selectionNotice by remember { mutableStateOf<String?>(null) }
+    var frozenPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    val locked = remember { AtomicBoolean(false) }
 
     // Analysis and UI run on different threads; the reference is thread safe.
     val target = remember { AtomicReference<PieceAppearance?>(null) }
@@ -154,7 +159,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                 analysis.setAnalyzer(worker) { frame ->
                     try {
                         val now = SystemClock.elapsedRealtime()
-                        if (!disposed.get() && now - last >= 300) {
+                        if (!disposed.get() && !locked.get() && now - last >= 300) {
                             last = now
                             val sampled = LiveCameraFrameSampler.sample(frame)
                             if (sampled != null) {
@@ -173,11 +178,15 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                                     SimilarObjectCounter.matches(exemplar, regions).size
                                 val confirmed = stabilizer.update(detected)
                                 main.execute {
-                                    if (!disposed.get() && version == generation.get()) {
+                                    if (!disposed.get() && !locked.get() && version == generation.get()) {
                                         result = CountFrame(
                                             sampled.width, sampled.height, regions, sampled.pixels, detected
                                         )
                                         stableCount = confirmed?.takeIf { it == detected }
+                                        if (confirmed == detected && detected > 0) {
+                                            frozenPhoto = Bitmap.createBitmap(sampled.pixels,sampled.width,sampled.height,Bitmap.Config.ARGB_8888)
+                                            locked.set(true)
+                                        }
                                         error = null
                                     }
                                 }
@@ -248,18 +257,22 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                     color = Color.White.copy(alpha = .7f), fontSize = 10.sp)
             }
             TextButton(onClick = {
+                locked.set(false)
+                frozenPhoto = null
+                result = null
                 reference = null
                 target.set(null)
                 generation.incrementAndGet()
                 stableCount = null
                 saved = false
             }) {
-                Text("Mudar peça", color = lime)
+                Text("Nova leitura", color = lime)
             }
         }
 
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             AndroidView(factory = { preview }, modifier = Modifier.fillMaxSize())
+            frozenPhoto?.let { Image(it.asImageBitmap(),"Imagem fixada dos objetos",Modifier.fillMaxSize(),contentScale = ContentScale.FillBounds) }
             Canvas(
                 Modifier.fillMaxSize().pointerInput(Unit) {
                     detectTapGestures { position ->
@@ -277,6 +290,12 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                             target.set(exemplar)
                             generation.incrementAndGet()
                             stableCount = null
+                            if (locked.get()) {
+                                val regions = LiveObjectCounter.detect(frame.pixels,frame.width,frame.height,sensitivity,reference = exemplar)
+                                val count = SimilarObjectCounter.matches(exemplar,regions).size
+                                result = CountFrame(frame.width,frame.height,regions,frame.pixels,count)
+                                stableCount = count
+                            }
                             saved = false
                             selectionNotice = null
                         } else {
@@ -313,7 +332,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                 }
             }
             Text(
-                if (reference == null) "CONTANDO OBJETOS · TOQUE PARA FILTRAR UMA PEÇA"
+                if (locked.get()) "IMAGEM FIXADA · NOVA LEITURA PARA ESCANEAR DE NOVO"
+                else if (reference == null) "CONTANDO OBJETOS · TOQUE PARA FILTRAR UMA PEÇA"
                 else "VERDE: PEÇAS VISUALMENTE SEMELHANTES",
                 color = Color.White,
                 fontSize = 11.sp,
@@ -376,6 +396,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                         enabled = sensitivity != choice,
                         onClick = {
                             sensitivity = choice
+                            locked.set(false)
+                            frozenPhoto = null
                             threshold.set(choice)
                             generation.incrementAndGet()
                             stableCount = null

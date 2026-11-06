@@ -357,10 +357,10 @@ internal fun LiveContourCamera(
                     enabled = tool == LiveMeasureTool.TANK || (capture != null && !capturing),
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = lime, contentColor = ink)
-                ) { Text(if (tool == LiveMeasureTool.TANK) "Medir tanque em AR" else "Marcar pontos") }
+                ) { Text(if (tool == LiveMeasureTool.TANK) "Medir tanque" else "Marcar pontos na foto") }
                 OutlinedButton(onClick = { if (tool == LiveMeasureTool.TANK) onManual() else onAr() },
                     modifier = Modifier.weight(1f)) {
-                    Text(if (tool == LiveMeasureTool.TANK) "Dimensões manuais" else "Medir em AR", color = lime)
+                    Text(if (tool == LiveMeasureTool.TANK) "Dimensões manuais" else "Medir no ambiente", color = lime)
                 }
             }
         }

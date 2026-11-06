@@ -99,6 +99,8 @@ fun CameraMeasurementScreen(
     var arOpen by rememberSaveable { mutableStateOf(false) }
     var chooseTankShape by remember { mutableStateOf(false) }
     var tankShapeForAr by remember { mutableStateOf<TankShape?>(null) }
+    var chooseEnvironment by remember { mutableStateOf(false) }
+    var automaticEnvironment by remember { mutableStateOf(true) }
     val arLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -121,8 +123,7 @@ fun CameraMeasurementScreen(
         if (liveTool == LiveMeasureTool.TANK) {
             chooseTankShape = true
         } else {
-            arOpen = true
-            arLaunchRequested = true
+            chooseEnvironment = true
         }
     }
     LaunchedEffect(arLaunchRequested) {
@@ -131,10 +132,18 @@ fun CameraMeasurementScreen(
             arLauncher.launch(ArMeasurementActivity.intent(
                 context,
                 area = liveTool == LiveMeasureTool.AREA,
-                shape = if (liveTool == LiveMeasureTool.TANK) tankShapeForAr else null
+                shape = if (liveTool == LiveMeasureTool.TANK) tankShapeForAr else null,
+                automatic = automaticEnvironment
             ))
         }
     }
+    if (chooseEnvironment) AlertDialog(
+        onDismissRequest = { chooseEnvironment = false },
+        title = { Text("Medir no ambiente") },
+        text = { Text("Os pontos ficam presos à superfície enquanto você move o celular. É necessário um aparelho compatível. Escolha encontrar o objeto ou marcar as pontas.") },
+        confirmButton = { TextButton(onClick = { automaticEnvironment = true; chooseEnvironment = false; arOpen = true; arLaunchRequested = true }) { Text("Encontrar objeto") } },
+        dismissButton = { TextButton(onClick = { automaticEnvironment = false; chooseEnvironment = false; arOpen = true; arLaunchRequested = true }) { Text("Marcar pontas") } }
+    )
     if (chooseTankShape) {
         AlertDialog(
             onDismissRequest = { chooseTankShape = false },

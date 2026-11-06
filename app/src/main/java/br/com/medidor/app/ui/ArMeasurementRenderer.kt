@@ -67,6 +67,8 @@ internal class ArMeasurementRenderer(
     private var lastAnalysisTimestamp = 0L
     private val background = ArCameraBackground()
     private val tap = AtomicReference<PointF?>()
+    private data class PointEdit(val index: Int, val normalized: PointF)
+    private val edit = AtomicReference<PointEdit?>()
     private val anchors = mutableListOf<Anchor>()
     private val corners = mutableListOf<Pair<Double, Double>>()
     private val measuredDimensions = mutableListOf<Double>()
@@ -87,6 +89,9 @@ internal class ArMeasurementRenderer(
 
     /** Coordinates are normalized in the actual camera View, independent of the GL buffer size. */
     fun requestPoint(x: Float, y: Float) { if (x in 0f..1f && y in 0f..1f) tap.set(PointF(x, y)) }
+    fun requestMove(index: Int, x: Float, y: Float) {
+        if (x in 0f..1f && y in 0f..1f) edit.set(PointEdit(index,PointF(x,y)))
+    }
 
     fun setAutomatic(enabled: Boolean) {
         clear()
@@ -94,6 +99,7 @@ internal class ArMeasurementRenderer(
     }
 
     fun undo() {
+        edit.set(null)
         automatic = false
         if (tankDimensions.isNotEmpty() && anchors.isEmpty() &&
             measuredDimensions.isNotEmpty()) {
@@ -115,6 +121,7 @@ internal class ArMeasurementRenderer(
     }
 
     fun clear() {
+        edit.set(null)
         anchors.forEach { anchor ->
             try { anchor.detach() } catch (_: Exception) { }
         }
@@ -163,6 +170,7 @@ internal class ArMeasurementRenderer(
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        edit.set(null)
         tap.set(null)
         viewportWidth = width.coerceAtLeast(1)
         viewportHeight = height.coerceAtLeast(1)
@@ -210,7 +218,10 @@ internal class ArMeasurementRenderer(
                 showUnavailable("Rastreamento dos pontos pausado. Aponte de volta para a superfície.")
                 return
             }
-            if (touch != null) {
+            val moved = edit.getAndSet(null)
+            if (moved != null) {
+                movePoint(frame,moved.index,PointF(moved.normalized.x*viewportWidth,moved.normalized.y*viewportHeight))
+            } else if (touch != null) {
                 if (automatic) {
                     clear()
                     automatic = false
@@ -361,7 +372,7 @@ internal class ArMeasurementRenderer(
                     anchors += checkNotNull(session).createAnchor(com.google.ar.core.Pose.makeTranslation(floatPoint(stable[1])))
                 } catch (e: Exception) { clear(); throw e }
             }
-            notice = "Medida automática encontrada. Confira o contorno e confirme."
+            notice = "Medida fixada. Arraste as pontas para ajustar ou confirme."
         } catch (_: NotYetAvailableException) {
             rejectAutomatic("Preparando a imagem da câmera…")
         }
@@ -442,6 +453,33 @@ internal class ArMeasurementRenderer(
         notice = null
     }
 
+    private fun movePoint(frame: Frame,index: Int,touch: PointF) {
+        val hits = frame.hitTest(touch.x,touch.y).filter { it.distance in .2f..8f && it.trackable.trackingState == TrackingState.TRACKING }
+        if (areaMode) {
+            if (index !in corners.indices) return
+            val plane = areaPlane?.let(::rootPlane) ?: return
+            val hit = hits.firstOrNull { val p = it.trackable as? Plane
+                p != null && rootPlane(p) == plane && p.isPoseInPolygon(it.hitPose) } ?: run {
+                notice = "Arraste a ponta sobre a mesma superfície."; return
+            }
+            val local = anchors.first().pose.inverse().transformPoint(hit.hitPose.translation)
+            if (abs(local[1]) > .03f || hypot(local[0].toDouble(),local[2].toDouble()) > 8.0) return
+            corners[index] = local[0].toDouble() to local[2].toDouble()
+        } else {
+            if (index !in anchors.indices) return
+            val hit = hits.firstOrNull { it.trackable is DepthPoint ||
+                (tankDimensions.isEmpty() && (it.trackable as? Plane)?.isPoseInPolygon(it.hitPose) == true) } ?: run {
+                notice = "A câmera ainda não reconheceu a superfície nessa posição."; return
+            }
+            val replacement = hit.createAnchor()
+            anchors[index].detach()
+            anchors[index] = replacement
+        }
+        automatic = false
+        anchorStability.reset()
+        notice = "Medida ajustada. As pontas continuam fixas no ambiente."
+    }
+
     private fun rootPlane(plane: Plane): Plane {
         var root = plane
         while (true) root = root.subsumedBy ?: return root
@@ -490,6 +528,7 @@ internal class ArMeasurementRenderer(
     }
 
     private fun showUnavailable(message: String) {
+        edit.set(null)
         frameValidity.invalidate()
         resetStability()
         latest = ArMeasurementFrame(message = message, dimensionIndex = measuredDimensions.size, automatic = automatic)

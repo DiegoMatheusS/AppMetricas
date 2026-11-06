@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.InputDevice
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -37,7 +38,14 @@ class PointMeasurementUiTest {
             SystemClock.sleep(100)
             val screen = instrumentation.uiAutomation.takeScreenshot()!!
             val pixel = screen.getPixel(first.first.toInt(),first.second.toInt())
-            assertTrue("Ponto desenhado exatamente no toque",android.graphics.Color.red(pixel)>240 && android.graphics.Color.green(pixel) in 160..195 && android.graphics.Color.blue(pixel)<100)
+            var minX = screen.width; var minY = screen.height; var maxX = -1; var maxY = -1
+            for (y in 0 until screen.height) for (x in 0 until screen.width) {
+                val color = screen.getPixel(x,y)
+                if (android.graphics.Color.red(color)>240 && android.graphics.Color.green(color) in 160..195 && android.graphics.Color.blue(color)<100) {
+                    minX=minOf(minX,x); minY=minOf(minY,y); maxX=maxOf(maxX,x); maxY=maxOf(maxY,y)
+                }
+            }
+            assertTrue("Ponto no toque=$first cor=${Integer.toHexString(pixel)} encontrado=[$minX,$minY,$maxX,$maxY] captura=${screen.width}x${screen.height}",android.graphics.Color.red(pixel)>240 && android.graphics.Color.green(pixel) in 160..195 && android.graphics.Color.blue(pixel)<100)
             screen.recycle()
             tapPhoto(.5f,.2f)
             waitFor("Quanto mede a linha amarela?")
@@ -48,6 +56,8 @@ class PointMeasurementUiTest {
             instrumentation.waitForIdleSync()
             assertEquals(1,saved.size)
             assertTrue(saved[0].startsWith("Distância: 20 cm"))
+            dragPhoto(.9f,.8f,.7f,.8f)
+            waitFor("Distância: 15 cm")
             click("Área")
             tapPhoto(.1f,.5f); tapPhoto(.9f,.5f); tapPhoto(.9f,.9f); tapPhoto(.1f,.9f)
             waitFor("Área: 150 cm²")
@@ -109,11 +119,31 @@ class PointMeasurementUiTest {
         val now = SystemClock.uptimeMillis()
         val down = MotionEvent.obtain(now,now,MotionEvent.ACTION_DOWN,px,py,0)
         val up = MotionEvent.obtain(now,now+50,MotionEvent.ACTION_UP,px,py,0)
+        down.source = InputDevice.SOURCE_TOUCHSCREEN
+        up.source = InputDevice.SOURCE_TOUCHSCREEN
         try {
             assertTrue(instrumentation.uiAutomation.injectInputEvent(down,true))
             assertTrue(instrumentation.uiAutomation.injectInputEvent(up,true))
         } finally { down.recycle(); up.recycle() }
         instrumentation.waitForIdleSync()
         return px to py
+    }
+
+    private fun dragPhoto(x0: Float,y0: Float,x1: Float,y1: Float) {
+        val bounds = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+        val scale = min(bounds.width()/800f,bounds.height()/600f)
+        fun point(x: Float,y: Float) = (bounds.left+(bounds.width()-800*scale)/2+x*800*scale) to
+            (bounds.top+(bounds.height()-600*scale)/2+y*600*scale)
+        val a = point(x0,y0); val b = point(x1,y1)
+        val start = SystemClock.uptimeMillis()
+        for (step in 0..10) {
+            val fraction = step/10f
+            val action = if (step==0) MotionEvent.ACTION_DOWN else if (step==10) MotionEvent.ACTION_UP else MotionEvent.ACTION_MOVE
+            val event = MotionEvent.obtain(start,SystemClock.uptimeMillis(),action,a.first+(b.first-a.first)*fraction,a.second+(b.second-a.second)*fraction,0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event,true)) } finally { event.recycle() }
+            SystemClock.sleep(25)
+        }
+        instrumentation.waitForIdleSync()
     }
 }

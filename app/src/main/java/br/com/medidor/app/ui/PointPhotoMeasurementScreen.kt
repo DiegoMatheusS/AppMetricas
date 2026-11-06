@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -46,8 +47,9 @@ internal fun PointPhotoMeasurementScreen(
     var unit by remember { mutableStateOf(LengthUnit.CENTIMETERS) }
     var saved by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var dragged by remember(photo) { mutableStateOf<Pair<Boolean,Int>?>(null) }
     val number = remember { NumberFormat.getNumberInstance(Locale.forLanguageTag("pt-BR")).apply { maximumFractionDigits = 2 } }
-    fun length(mm: Double) = if (mm >= 1000) "${number.format(mm / 1000)} m" else "${number.format(mm / 10)} cm"
+    fun length(mm: Double) = "${number.format(mm / 10)} cm"
     val span = if (reference.size == 2) PhotoCalibration.distancePixels(reference[0], reference[1], photo.width, photo.height) else null
     val ratio = if (scaleMm != null && span != null && ReferenceMarkQuality.isReadable(span)) scaleMm!! / span else null
     val distance = if (!areaMode && points.size == 2 && ratio != null)
@@ -60,10 +62,11 @@ internal fun PointPhotoMeasurementScreen(
     val instruction = when {
         scaleMm == null && reference.size < 2 -> "1. Toque nos dois extremos de uma referência conhecida na foto."
         scaleMm == null -> "2. Informe quanto mede a linha amarela para definir a escala."
+        ratio == null -> "Afaste os pontos da referência para calcular a medida."
         areaMode && points.size < 3 -> "3. Toque em pelo menos três cantos, na ordem, para calcular a área."
         areaMode && area == null -> "As linhas se cruzam. Desfaça o último canto."
         !areaMode && points.size < 2 -> "3. Toque no início e no fim da distância."
-        else -> "Medida calculada. Confira as linhas antes de salvar."
+        else -> "Medida fixada. Arraste as pontas para ajustar ou salve."
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -90,6 +93,32 @@ internal fun PointPhotoMeasurementScreen(
                         }
                         destination.add(point); saved = false; notice = null
                         if (scaleMm == null && reference.size == 2) scaleDialog = true
+                    }
+                }.pointerInput(photo,scaleMm,areaMode) {
+                    detectDragGestures(
+                        onDragStart = { touch ->
+                            val rect = imageRect(size.width.toFloat(),size.height.toFloat(),photo.width,photo.height)
+                            val candidates = reference.indices.map { true to it } + points.indices.map { false to it }
+                            dragged = candidates.minByOrNull { (isRef,index) ->
+                                val p = if (isRef) reference[index] else points[index]
+                                (Offset(rect.left+p.x*rect.width,rect.top+p.y*rect.height)-touch).getDistance()
+                            }?.takeIf { (isRef,index) ->
+                                val p = if (isRef) reference[index] else points[index]
+                                (Offset(rect.left+p.x*rect.width,rect.top+p.y*rect.height)-touch).getDistance() <= 28.dp.toPx()
+                            }
+                        },
+                        onDragEnd = { dragged = null },
+                        onDragCancel = { dragged = null }
+                    ) { change, _ ->
+                        val selected = dragged
+                        if (selected != null) {
+                            val mapped = photoPointFromTouch(change.position,size,photo.width,photo.height)
+                            if (mapped != null) {
+                                if (selected.first) reference[selected.second] = mapped else points[selected.second] = mapped
+                                saved = false; notice = null
+                            }
+                            change.consume()
+                        }
                     }
                 }) {
                 val rect = imageRect(size.width, size.height, photo.width, photo.height)
