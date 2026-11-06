@@ -1,5 +1,8 @@
 package br.com.medidor.app.ui
 
+import android.graphics.Bitmap
+import androidx.compose.ui.geometry.Offset
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +30,8 @@ fun ObjectCountHome(
     onBack: () -> Unit = {}
 ) {
     var live by remember { mutableStateOf(true) }
+    var captured by remember { mutableStateOf<Bitmap?>(null) }
+    var capturedMarks by remember { mutableStateOf<List<Offset>>(emptyList()) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().background(Color(0xFF14251F))
@@ -51,9 +56,9 @@ fun ObjectCountHome(
         }
         Box(Modifier.fillMaxSize()) {
             if (live) {
-                LiveObjectCountScreen(onSave)
+                LiveObjectCountScreen(onSave) { photo, marks -> captured = photo; capturedMarks = marks; live = false }
             } else {
-                ObjectCountScreen(onSave)
+                ObjectCountScreen(onSave, captured, capturedMarks)
             }
         }
     }

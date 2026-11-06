@@ -15,6 +15,8 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -92,6 +94,8 @@ private data class ContourSelection(
 internal fun LiveContourCamera(
     onPhoto: (Bitmap) -> Unit,
     onError: (String) -> Unit,
+    errorMessage: String? = null,
+    onGallery: () -> Unit = {},
     tool: LiveMeasureTool = LiveMeasureTool.RULER,
     onBack: () -> Unit = {},
     onManual: () -> Unit = {},
@@ -104,6 +108,7 @@ internal fun LiveContourCamera(
     val latestError by rememberUpdatedState(onError)
     val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
     val worker = remember { Executors.newSingleThreadExecutor() }
+    var showContours by remember { mutableStateOf(false) }
     var autoSearch by remember { mutableStateOf(true) }
     var tapMarker by remember { mutableStateOf<NormalizedPoint?>(null) }
     var areaMode by remember { mutableStateOf(false) }
@@ -117,10 +122,10 @@ internal fun LiveContourCamera(
         PreviewView(context).apply { scaleType=PreviewView.ScaleType.FILL_CENTER }
     }
 
-    val selection = remember { AtomicReference(ContourSelection()) }
+    val selection = remember { AtomicReference(ContourSelection(ready = false)) }
     fun restartSearch(message: String) {
         selection.set(ContourSelection(autoSearch, tapMarker, drawnArea, tolerance,
-            ready = !areaMode || drawnArea != null))
+            ready = showContours && (!areaMode || drawnArea != null)))
         overlay = ContourOverlay(1, 1, null, message)
     }
 
@@ -202,7 +207,16 @@ internal fun LiveContourCamera(
                     .setViewPort(viewPort)
                     .build()
                 provider.unbindAll()
-                provider.bindToLifecycle(owner,CameraSelector.DEFAULT_BACK_CAMERA,group)
+                try {
+                    provider.bindToLifecycle(owner,CameraSelector.DEFAULT_BACK_CAMERA,group)
+                } catch (_: Exception) {
+                    provider.unbindAll()
+                    analysis.clearAnalyzer()
+                    val photoGroup = UseCaseGroup.Builder().addUseCase(preview)
+                        .addUseCase(imageCapture).setViewPort(viewPort).build()
+                    provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, photoGroup)
+                    latestError("Use Marcar pontos para medir. A análise ao vivo não está disponível neste aparelho.")
+                }
                 boundProvider = provider
                 capture = imageCapture
             } catch (e: Exception) {
@@ -269,93 +283,13 @@ internal fun LiveContourCamera(
         )
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize()) {
-            AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
-            Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
-                detectTapGestures { touch ->
-                    val n = LiveViewportMapping.point(touch.x,touch.y,
-                        size.width.toFloat(),size.height.toFloat())
-                        ?.let { NormalizedPoint(it.first,it.second) }
-                    if (n != null) {
-                        val message = if (!areaMode) {
-                            autoSearch = false
-                            tapMarker = n
-                            "Buscando contorno no ponto selecionado…"
-                        } else {
-                            val region = drawnArea
-                            when {
-                                region != null && region.contains(n) -> {
-                                    autoSearch = false
-                                    tapMarker = n
-                                    "Buscando contorno dentro da área delimitada…"
-                                }
-                                region != null -> "Toque dentro da área delimitada ou redefina-a."
-                                firstCorner == null -> {
-                                    firstCorner = n
-                                    "Toque no canto oposto para fechar a área."
-                                }
-                                else -> {
-                                    val newArea = ContourNormalizedArea.fromCorners(firstCorner!!, n)
-                                    if (newArea == null) {
-                                        "Área pequena demais. Escolha cantos mais distantes."
-                                    } else {
-                                        drawnArea = newArea
-                                        firstCorner = null
-                                        "Área definida. Toque no objeto para refinar a busca."
-                                    }
-                                }
-                            }
-                        }
-                        restartSearch(message)
-                    }
-                }
-            }) {
-                val region = drawnArea
-                if (region != null) {
-                    val color = Color(0xFFFFBF66)
-                    val left = size.width*region.left
-                    val right = size.width*region.right
-                    val top = size.height*region.top
-                    val bottom = size.height*region.bottom
-                    drawLine(color,Offset(left,top),Offset(right,top),2.dp.toPx())
-                    drawLine(color,Offset(right,top),Offset(right,bottom),2.dp.toPx())
-                    drawLine(color,Offset(right,bottom),Offset(left,bottom),2.dp.toPx())
-                    drawLine(color,Offset(left,bottom),Offset(left,top),2.dp.toPx())
-                }
-                firstCorner?.let { corner ->
-                    drawCircle(Color(0xFFFFBF66),7.dp.toPx(),
-                        Offset(size.width*corner.x,size.height*corner.y))
-                }
-                tapMarker?.let { marker ->
-                    val pos = Offset(size.width * marker.x, size.height * marker.y)
-                    drawCircle(Color(0xFFFFBF66), 10.dp.toPx(), pos)
-                    drawCircle(Color(0xFF14251F), 5.dp.toPx(), pos)
-                }
-                val frame = overlay ?: return@Canvas
-                val c = frame.contour ?: return@Canvas
-                val color = Color(0xFFC0F565)
-                val top = size.height*c.minY.toFloat()/c.height
-                val bottom = size.height*(c.maxY+1f)/c.height
-                val left = size.width*c.minX.toFloat()/c.width
-                val right = size.width*(c.maxX+1f)/c.width
-                drawLine(color,Offset(left,top),Offset(right,top),3.dp.toPx())
-                drawLine(color,Offset(right,top),Offset(right,bottom),3.dp.toPx())
-                drawLine(color,Offset(right,bottom),Offset(left,bottom),3.dp.toPx())
-                drawLine(color,Offset(left,bottom),Offset(left,top),3.dp.toPx())
-                c.outline.forEach { p ->
-                    drawCircle(color,1.1.dp.toPx(),
-                        Offset(size.width*(p.x.toFloat()/c.width),
-                            size.height*(p.y.toFloat()/c.height)))
-                }
-            }
-        }
-        val ink = Color(0xFF14251F)
-        val lime = Color(0xFFC0F565)
+    val ink = Color(0xFF14251F)
+    val lime = Color(0xFFC0F565)
+    Column(Modifier.fillMaxSize().background(ink)) {
         Column(
-            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -417,97 +351,121 @@ internal fun LiveContourCamera(
                     }
                 }
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    when {
-                        overlay?.contour != null -> "✓ Contorno visual detectado"
-                        overlay == null -> "◉ Iniciando análise..."
-                        else -> "Sem contorno — veja orientação"
-                    },
-                    color = Color.White, fontSize = 12.sp,
-                    modifier = Modifier.weight(1f).background(ink.copy(alpha = 0.93f),
-                        RoundedCornerShape(24.dp)).padding(horizontal = 10.dp, vertical = 7.dp)
-                )
-                TextButton(onClick = onAr) {
-                    Text("Medir automaticamente", color = lime, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { if (tool == LiveMeasureTool.TANK) onAr() else captureMeasurement() },
+                    enabled = tool == LiveMeasureTool.TANK || (capture != null && !capturing),
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = lime, contentColor = ink)
+                ) { Text(if (tool == LiveMeasureTool.TANK) "Medir tanque em AR" else "Marcar pontos") }
+                OutlinedButton(onClick = { if (tool == LiveMeasureTool.TANK) onManual() else onAr() },
+                    modifier = Modifier.weight(1f)) {
+                    Text(if (tool == LiveMeasureTool.TANK) "Dimensões manuais" else "Medir em AR", color = lime)
                 }
             }
         }
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .background(ink.copy(alpha = 0.98f),
-                    RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                when (tool) {
-                    LiveMeasureTool.RULER -> "Dois pontos. Uma medida."
-                    LiveMeasureTool.AREA -> "Contorne a área"
-                    LiveMeasureTool.TANK -> "Contorne o tanque"
-                },
-                color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp
-            )
-            Text(
-                when (tool) {
-                    LiveMeasureTool.RULER ->
-                        "Capture a imagem e toque nos dois extremos da medida. Uma referência calibrada no mesmo plano é necessária para obter centímetros."
-                    LiveMeasureTool.AREA ->
-                        "Capture a imagem, depois marque os cantos da área em sequência. Calibre com uma referência no mesmo plano para calcular m²."
-                    LiveMeasureTool.TANK ->
-                        "Acompanhe o contorno visual ou escolha Medir em AR para marcar as dimensões do tanque."
-                },
-                color = Color.White.copy(alpha = 0.75f),
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                overlay?.message ?: "Preparando análise pela câmera...",
-                color = if (overlay?.contour != null) lime
-                    else Color.White.copy(alpha = .8f),
-                fontSize = 11.sp
-            )
-            overlay?.contour?.let {
-                Text(
-                    "Região: ${(it.widthFraction*100).toInt()}% da largura × " +
-                        "${(it.heightFraction*100).toInt()}% da altura do quadro",
-                    color = lime, fontSize = 12.sp
-                )
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
+            Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
+                detectTapGestures { touch ->
+                    if (!showContours) return@detectTapGestures
+                    val n = LiveViewportMapping.point(touch.x,touch.y,
+                        size.width.toFloat(),size.height.toFloat())
+                        ?.let { NormalizedPoint(it.first,it.second) }
+                    if (n != null) {
+                        val message = if (!areaMode) {
+                            autoSearch = false
+                            tapMarker = n
+                            "Buscando contorno no ponto selecionado…"
+                        } else {
+                            val region = drawnArea
+                            when {
+                                region != null && region.contains(n) -> {
+                                    autoSearch = false
+                                    tapMarker = n
+                                    "Buscando contorno dentro da área delimitada…"
+                                }
+                                region != null -> "Toque dentro da área delimitada ou redefina-a."
+                                firstCorner == null -> {
+                                    firstCorner = n
+                                    "Toque no canto oposto para fechar a área."
+                                }
+                                else -> {
+                                    val newArea = ContourNormalizedArea.fromCorners(firstCorner!!, n)
+                                    if (newArea == null) {
+                                        "Área pequena demais. Escolha cantos mais distantes."
+                                    } else {
+                                        drawnArea = newArea
+                                        firstCorner = null
+                                        "Área definida. Toque no objeto para refinar a busca."
+                                    }
+                                }
+                            }
+                        }
+                        restartSearch(message)
+                    }
+                }
+            }) {
+                val region = drawnArea
+                if (region != null) {
+                    val color = Color(0xFFFFBF66)
+                    val left = size.width*region.left
+                    val right = size.width*region.right
+                    val top = size.height*region.top
+                    val bottom = size.height*region.bottom
+                    drawLine(color,Offset(left,top),Offset(right,top),2.dp.toPx())
+                    drawLine(color,Offset(right,top),Offset(right,bottom),2.dp.toPx())
+                    drawLine(color,Offset(right,bottom),Offset(left,bottom),2.dp.toPx())
+                    drawLine(color,Offset(left,bottom),Offset(left,top),2.dp.toPx())
+                }
+                firstCorner?.let { corner ->
+                    drawCircle(Color(0xFFFFBF66),7.dp.toPx(),
+                        Offset(size.width*corner.x,size.height*corner.y))
+                }
+                tapMarker?.let { marker ->
+                    val pos = Offset(size.width * marker.x, size.height * marker.y)
+                    drawCircle(Color(0xFFFFBF66), 10.dp.toPx(), pos)
+                    drawCircle(Color(0xFF14251F), 5.dp.toPx(), pos)
+                }
+                if (!showContours) return@Canvas
+                val frame = overlay ?: return@Canvas
+                val c = frame.contour ?: return@Canvas
+                val color = Color(0xFFC0F565)
+                val top = size.height*c.minY.toFloat()/c.height
+                val bottom = size.height*(c.maxY+1f)/c.height
+                val left = size.width*c.minX.toFloat()/c.width
+                val right = size.width*(c.maxX+1f)/c.width
+                drawLine(color,Offset(left,top),Offset(right,top),3.dp.toPx())
+                drawLine(color,Offset(right,top),Offset(right,bottom),3.dp.toPx())
+                drawLine(color,Offset(right,bottom),Offset(left,bottom),3.dp.toPx())
+                drawLine(color,Offset(left,bottom),Offset(left,top),3.dp.toPx())
+                c.outline.forEach { p ->
+                    drawCircle(color,1.1.dp.toPx(),
+                        Offset(size.width*(p.x.toFloat()/c.width),
+                            size.height*(p.y.toFloat()/c.height)))
+                }
             }
-            Button(
-                onClick = {
-                    if (tool == LiveMeasureTool.TANK) onManual()
-                    else captureMeasurement()
-                },
-                enabled = tool == LiveMeasureTool.TANK || (capture != null && !capturing),
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = lime, contentColor = ink
-                ),
-                shape = RoundedCornerShape(13.dp)
-            ) {
-                Text(
-                    if (tool == LiveMeasureTool.TANK) "Informar dimensões do tanque"
-                    else if (capturing) "Capturando..." else "Marcar pontos na câmera",
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Text(
-                if (tool == LiveMeasureTool.TANK)
-                    "A capacidade precisa do diâmetro e da altura medidos. Nenhuma medida é inventada."
-                else "Sem referência calibrada não há resultado em metros ou m².",
-                fontSize = 10.sp, color = Color.White.copy(alpha = 0.65f)
-            )
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Text(errorMessage ?: when {
+                capturing -> "Capturando a foto…"
+                capture == null -> "Preparando câmera. Você também pode abrir uma fotografia."
+                tool == LiveMeasureTool.TANK -> "Meça as dimensões em AR ou informe os valores conhecidos."
+                else -> "Toque em Marcar pontos. A foto ficará fixa para medir com uma referência conhecida."
+            }, color = Color.White, fontSize = 13.sp)
+            if (tool != LiveMeasureTool.TANK) TextButton(onClick = onGallery) { Text("Abrir fotografia", color = lime) }
         }
         if (menuOpen) {
             ModalBottomSheet(onDismissRequest = { menuOpen = false }) {
                 Column(
-                    Modifier.padding(16.dp),
+                    Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
 
+        FilterChip(selected = showContours, onClick = {
+            showContours = !showContours
+            restartSearch(if (showContours) "Buscando contornos…" else "Contornos ocultos.")
+        }, label = { Text("Mostrar contornos") })
         Text("Contorno ao vivo — experimental",
             style = MaterialTheme.typography.titleMedium)
         Text("A busca automática procura objetos isolados. Se não encontrar, " +

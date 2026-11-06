@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.graphics.Bitmap
@@ -42,12 +44,12 @@ import kotlin.math.min
  * This feature does not detect, infer or estimate occluded objects automatically.
  */
 @Composable
-fun ObjectCountScreen(onSave: (String, String) -> Unit) {
+fun ObjectCountScreen(onSave: (String, String) -> Unit, initialPhoto: Bitmap? = null, initialMarks: List<Offset> = emptyList()) {
     val context = LocalContext.current
-    var photo by remember { mutableStateOf<Bitmap?>(null) }
+    var photo by remember(initialPhoto) { mutableStateOf(initialPhoto) }
     var error by remember { mutableStateOf<String?>(null) }
     var saved by remember { mutableStateOf(false) }
-    val marks = remember { mutableStateListOf<Offset>() }
+    val marks = remember(initialPhoto) { mutableStateListOf<Offset>().apply { addAll(initialMarks) } }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
@@ -66,7 +68,7 @@ fun ObjectCountScreen(onSave: (String, String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Contagem assistida por foto", style = MaterialTheme.typography.titleLarge)
-        Text("Toque uma vez em cada objeto visível. Os pontos numerados ajudam a não contar o mesmo item duas vezes. Não há reconhecimento automático nesta versão.")
+        Text("Confira os pontos. Toque em uma peça sem ponto para adicionar ou toque em um ponto para removê-lo.")
         OutlinedButton(onClick = { pick.launch("image/*") }) {
             Text(if (photo == null) "Escolher fotografia" else "Trocar fotografia")
         }
@@ -81,7 +83,7 @@ fun ObjectCountScreen(onSave: (String, String) -> Unit) {
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
-                Canvas(Modifier.fillMaxSize().pointerInput(bitmap) {
+                Canvas(Modifier.fillMaxSize().semantics { contentDescription = "Área de contagem da foto" }.pointerInput(bitmap) {
                     detectTapGestures { touch ->
                         val scale = min(size.width.toFloat() / bitmap.width, size.height.toFloat() / bitmap.height)
                         val width = bitmap.width * scale
@@ -90,7 +92,9 @@ fun ObjectCountScreen(onSave: (String, String) -> Unit) {
                         val top = (size.height - height) / 2f
                         if (touch.x >= left && touch.x <= left + width &&
                             touch.y >= top && touch.y <= top + height && marks.size < 500) {
-                            marks.add(Offset((touch.x - left) / width, (touch.y - top) / height))
+                            val point = Offset((touch.x - left) / width, (touch.y - top) / height)
+                            val nearby = marks.indexOfFirst { kotlin.math.hypot((it.x-point.x)*width,(it.y-point.y)*height) < 18.dp.toPx() }
+                            if (nearby >= 0) marks.removeAt(nearby) else marks.add(point)
                             saved = false
                         }
                     }
@@ -118,7 +122,7 @@ fun ObjectCountScreen(onSave: (String, String) -> Unit) {
                 }) { Text("Limpar") }
             }
             if (marks.size == 500) Text("Limite de 500 marcações atingido.")
-            Text("Somente objetos identificados manualmente na imagem são contabilizados. Objetos ocultos ou sobrepostos podem ficar de fora.",
+            Text("Confira cada ponto antes de salvar. Objetos ocultos ou sobrepostos podem ficar de fora.",
                 style = MaterialTheme.typography.bodySmall)
             Button(enabled = marks.isNotEmpty() && !saved, onClick = {
                 onSave("Contagem assistida", "${marks.size} objetos marcados manualmente em fotografia")

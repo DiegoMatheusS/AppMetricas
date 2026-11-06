@@ -30,6 +30,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
 import br.com.medidor.app.data.LocalHistory
 import br.com.medidor.app.domain.TankShape
+import br.com.medidor.app.domain.CameraViewportMapping
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Config
 import com.google.ar.core.Session
@@ -86,7 +87,14 @@ internal class ArMeasurementActivity : ComponentActivity() {
         }
         areaMode = tankShape == null && intent.getBooleanExtra(EXTRA_AREA, false)
         overlay = ArMeasurementOverlay(this, ::updateControls) { x, y ->
-            if (running && !saved) renderer.requestPoint(x, y)
+            if (running && !saved) {
+                val overlayOrigin = IntArray(2).also(overlay::getLocationInWindow)
+                val cameraOrigin = IntArray(2).also(surface::getLocationInWindow)
+                CameraViewportMapping.cameraPoint(x,y,overlayOrigin[0],overlayOrigin[1],
+                    cameraOrigin[0],cameraOrigin[1],surface.width,surface.height)?.let {
+                    renderer.requestPoint(it.first,it.second)
+                }
+            }
         }
         renderer = ArMeasurementRenderer(
             { display?.rotation ?: Surface.ROTATION_0 }, areaMode, dimensions, overlay::publish
@@ -96,6 +104,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
             setPreserveEGLContextOnPause(true)
             setRenderer(this@ArMeasurementActivity.renderer)
         }
+        overlay.cameraView = surface
 
         val root = FrameLayout(this)
         root.addView(surface, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -362,6 +371,7 @@ private class ArMeasurementOverlay(
     private val updateControls: (ArMeasurementFrame) -> Unit,
     onPoint: (Float, Float) -> Unit
 ) : View(context) {
+    var cameraView: View? = null
     @Volatile private var frame = ArMeasurementFrame()
     private val lime = Color.rgb(192, 245, 101)
     private val density = resources.displayMetrics.density
@@ -393,9 +403,17 @@ private class ArMeasurementOverlay(
         super.onDraw(canvas)
         val current = frame
         updateControls(current)
+        val camera = cameraView ?: return
+        val cameraOrigin = IntArray(2).also(camera::getLocationInWindow)
+        val overlayOrigin = IntArray(2).also(::getLocationInWindow)
+        val points = current.points.map { point -> point?.let {
+            CameraViewportMapping.overlayPoint(it.x/current.viewportWidth,it.y/current.viewportHeight,
+                overlayOrigin[0],overlayOrigin[1],cameraOrigin[0],cameraOrigin[1],camera.width,camera.height)
+                ?.let { mapped -> android.graphics.PointF(mapped.first,mapped.second) }
+        } }
         current.sides.forEachIndexed { index, meters ->
-            val start = current.points[index] ?: return@forEachIndexed
-            val end = current.points[(index + 1) % current.points.size] ?: return@forEachIndexed
+            val start = points[index] ?: return@forEachIndexed
+            val end = points[(index + 1) % points.size] ?: return@forEachIndexed
             canvas.drawLine(start.x, start.y, end.x, end.y, line)
             val x = (start.x + end.x) / 2
             val y = (start.y + end.y) / 2
@@ -408,10 +426,10 @@ private class ArMeasurementOverlay(
                 canvas.drawText(text, x, y - (label.ascent() + label.descent()) / 2, label)
             }
         }
-        if (current.area != null && current.points.filterNotNull().size >= 3) {
-            val points = current.points.filterNotNull()
-            val centerX = points.map { it.x }.average().toFloat()
-            val centerY = points.map { it.y }.average().toFloat()
+        if (current.area != null && points.filterNotNull().size >= 3) {
+            val visible = points.filterNotNull()
+            val centerX = visible.map { it.x }.average().toFloat()
+            val centerY = visible.map { it.y }.average().toFloat()
             if (centerX in 0f..width.toFloat() && centerY in 0f..height.toFloat()) {
                 val caption = formatArArea(current.area)
                 val hw = label.measureText(caption) / 2 + 10 * density
@@ -422,7 +440,7 @@ private class ArMeasurementOverlay(
                     centerY - (label.ascent() + label.descent()) / 2, label)
             }
         }
-        for (point in current.points.filterNotNull()) {
+        for (point in points.filterNotNull()) {
             canvas.drawCircle(point.x, point.y, 7 * density, backing)
             canvas.drawCircle(point.x, point.y, 5 * density, line)
         }

@@ -38,7 +38,9 @@ internal data class ArMeasurementFrame(
     val message: String = "",
     val dimensionIndex: Int = 0,
     val automatic: Boolean = true,
-    val canConfirm: Boolean = false
+    val canConfirm: Boolean = false,
+    val viewportWidth: Int = 1,
+    val viewportHeight: Int = 1
 )
 
 internal class ArMeasurementRenderer(
@@ -83,7 +85,8 @@ internal class ArMeasurementRenderer(
     private val clipPoint = FloatArray(4)
     private val worldPoint = floatArrayOf(0f, 0f, 0f, 1f)
 
-    fun requestPoint(x: Float, y: Float) { tap.set(PointF(x, y)) }
+    /** Coordinates are normalized in the actual camera View, independent of the GL buffer size. */
+    fun requestPoint(x: Float, y: Float) { if (x in 0f..1f && y in 0f..1f) tap.set(PointF(x, y)) }
 
     fun setAutomatic(enabled: Boolean) {
         clear()
@@ -160,6 +163,7 @@ internal class ArMeasurementRenderer(
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        tap.set(null)
         viewportWidth = width.coerceAtLeast(1)
         viewportHeight = height.coerceAtLeast(1)
         GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
@@ -196,7 +200,7 @@ internal class ArMeasurementRenderer(
             camera.getProjectionMatrix(projection, 0, .05f, 100f)
             camera.getViewMatrix(view, 0)
             Matrix.multiplyMM(projectionView, 0, projection, 0, view, 0)
-            val touch = tap.getAndSet(null)
+            val touch = tap.getAndSet(null)?.let { PointF(it.x*viewportWidth,it.y*viewportHeight) }
             if (anchors.any { it.trackingState == TrackingState.STOPPED }) {
                 clear()
                 notice = "A referência foi perdida. Marque os pontos novamente."
@@ -481,7 +485,7 @@ internal class ArMeasurementRenderer(
             else -> "Toque no outro extremo. O primeiro ponto acompanha a superfície."
         }
         latest = ArMeasurementFrame(worldPoints.map(::project), sides, area,
-            message, dimensionIndex, automatic, canConfirm)
+            message, dimensionIndex, automatic, canConfirm, viewportWidth, viewportHeight)
         publish(latest)
     }
 

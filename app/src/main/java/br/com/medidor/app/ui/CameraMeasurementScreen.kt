@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -171,6 +172,7 @@ fun CameraMeasurementScreen(
         granted = it
     }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var pointEditor by remember { mutableStateOf(false) }
     var cameraMode by remember { mutableStateOf("live") }
     var coin by remember { mutableStateOf(BrazilianCoin.TWENTY_FIVE_CENTS) }
     var mode by remember { mutableStateOf("coin") }
@@ -187,6 +189,7 @@ fun CameraMeasurementScreen(
         if (uri != null) {
             try {
                 bitmap = SampledPhotos.fromUri(context.contentResolver, uri)
+                pointEditor = true
                 points.clear()
                 seed = null
                 saved = false
@@ -196,12 +199,19 @@ fun CameraMeasurementScreen(
             }
         }
     }
+    if (bitmap != null && pointEditor) {
+        BackHandler { bitmap = null; pointEditor = false }
+        PointPhotoMeasurementScreen(bitmap!!, liveTool == LiveMeasureTool.AREA,
+            onBack = { bitmap = null; pointEditor = false }, onSave = onSave)
+        return
+    }
     // The live analysis owns the entire portrait viewport. Photo calibration remains available
     // after capturing an analyzed frame; live sizes are only fractions of the image.
     if (bitmap == null && granted) {
         LiveContourCamera(
             onPhoto = {
                 bitmap = it
+                pointEditor = true
                 measureStyle = if (liveTool == LiveMeasureTool.AREA) "area" else "distance"
                 points.clear()
                 seed = null
@@ -209,6 +219,8 @@ fun CameraMeasurementScreen(
                 screenError = null
             },
             onError = { error -> screenError = error },
+            errorMessage = screenError,
+            onGallery = { pickPhoto.launch("image/*") },
             tool = liveTool,
             onBack = onBack,
             onManual = onManual,
@@ -810,16 +822,16 @@ internal fun CameraPreviewAndCapture(onPhoto: (Bitmap) -> Unit, onError: (String
     }
 }
 
-private data class ImageRect(val left: Float, val top: Float, val width: Float, val height: Float)
+internal data class ImageRect(val left: Float, val top: Float, val width: Float, val height: Float)
 
-private fun imageRect(viewWidth: Float, viewHeight: Float, photoWidth: Int, photoHeight: Int): ImageRect {
+internal fun imageRect(viewWidth: Float, viewHeight: Float, photoWidth: Int, photoHeight: Int): ImageRect {
     val scale = min(viewWidth / photoWidth, viewHeight / photoHeight)
     val width = photoWidth * scale
     val height = photoHeight * scale
     return ImageRect((viewWidth - width) / 2, (viewHeight - height) / 2, width, height)
 }
 
-private fun photoPointFromTouch(touch: Offset, viewSize: IntSize, width: Int, height: Int): NormalizedPoint? {
+internal fun photoPointFromTouch(touch: Offset, viewSize: IntSize, width: Int, height: Int): NormalizedPoint? {
     val rect = imageRect(viewSize.width.toFloat(), viewSize.height.toFloat(), width, height)
     if (rect.width <= 0f || rect.height <= 0f) return null
     val x = (touch.x - rect.left) / rect.width
