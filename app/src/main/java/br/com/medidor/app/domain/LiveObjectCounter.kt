@@ -43,11 +43,15 @@ object LiveObjectCounter {
         val raw = BooleanArray(pixels.size)
         for (i in pixels.indices) {
             val p = pixels[i]
-            raw[i] = maxOf(
+            raw[i] = if (reference == null) maxOf(
                 abs(((p ushr 16) and 255) - bgR),
                 abs(((p ushr 8) and 255) - bgG),
                 abs((p and 255) - bgB)
-            ) >= sensitivity
+            ) >= sensitivity else maxOf(
+                abs(((p ushr 16) and 255) - reference.red),
+                abs(((p ushr 8) and 255) - reference.green),
+                abs((p and 255) - reference.blue)
+            ) <= (110 - sensitivity).coerceIn(20, 80)
         }
         // 3x3 majority filter removes pepper noise and reconnects small gaps.
         val mask = BooleanArray(raw.size)
@@ -73,9 +77,17 @@ object LiveObjectCounter {
 
         return regions.sortedByDescending { it.area }.take(100)
     }
+
+    /** A tap can select a colored piece even when the frame border is a poor background sample. */
+    fun selectAt(pixels: IntArray, width: Int, height: Int, x: Int, y: Int, sensitivity: Int = 45): CountRegion? {
+        require(pixels.size == width * height && x in 0 until width && y in 0 until height)
+        val color = pixels[y * width + x]
+        val sample = PieceAppearance(1.0, 1.0, (color ushr 16) and 255, (color ushr 8) and 255, color and 255)
+        return SimilarObjectCounter.at(detect(pixels, width, height, sensitivity, reference = sample), x, y)
+    }
     private fun describe(indices: IntArray, pixels: IntArray, width: Int, height: Int): CountRegion? {
         val minArea = maxOf(24, pixels.size / 600)
-        if (indices.size < minArea || indices.size > pixels.size / 3) return null
+        if (indices.size < minArea || indices.size > pixels.size * .65) return null
         val left = indices.minOf { it % width }
         val right = indices.maxOf { it % width }
         val top = indices.minOf { it / width }

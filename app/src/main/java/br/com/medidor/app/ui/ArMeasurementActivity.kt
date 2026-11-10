@@ -30,6 +30,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
 import br.com.medidor.app.data.LocalHistory
 import br.com.medidor.app.domain.TankShape
+import br.com.medidor.app.domain.CameraViewportMapping
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Config
 import com.google.ar.core.Session
@@ -40,13 +41,15 @@ import java.util.Locale
 internal class ArMeasurementActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_AREA = "measure_area"
+        private const val EXTRA_AUTOMATIC = "automatic_measurement"
         const val EXTRA_SHAPE = "tank_shape"
         const val EXTRA_DIMENSIONS = "tank_dimensions"
 
-        fun intent(context: Context, area: Boolean = false, shape: TankShape? = null) =
+        fun intent(context: Context, area: Boolean = false, shape: TankShape? = null, automatic: Boolean = true) =
             Intent(context, ArMeasurementActivity::class.java)
                 .putExtra(EXTRA_AREA, area)
                 .putExtra(EXTRA_SHAPE, shape?.name)
+                .putExtra(EXTRA_AUTOMATIC, automatic)
     }
 
     private lateinit var surface: GLSurfaceView
@@ -85,17 +88,25 @@ internal class ArMeasurementActivity : ComponentActivity() {
             null -> emptyList()
         }
         areaMode = tankShape == null && intent.getBooleanExtra(EXTRA_AREA, false)
-        overlay = ArMeasurementOverlay(this, ::updateControls) { x, y ->
-            if (running && !saved) renderer.requestPoint(x, y)
+        overlay = ArMeasurementOverlay(this, ::updateControls, onMove = { index,x,y ->
+            if (running && !saved) cameraTouch(x,y)?.let { renderer.requestMove(index,it.first,it.second) }
+        }) { x, y ->
+            if (running && !saved) {
+                cameraTouch(x,y)?.let {
+                    renderer.requestPoint(it.first,it.second)
+                }
+            }
         }
         renderer = ArMeasurementRenderer(
             { display?.rotation ?: Surface.ROTATION_0 }, areaMode, dimensions, overlay::publish
         )
+        renderer.setAutomatic(intent.getBooleanExtra(EXTRA_AUTOMATIC,true))
         surface = GLSurfaceView(this).apply {
             setEGLContextClientVersion(2)
             setPreserveEGLContextOnPause(true)
             setRenderer(this@ArMeasurementActivity.renderer)
         }
+        overlay.cameraView = surface
 
         val root = FrameLayout(this)
         root.addView(surface, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -103,9 +114,9 @@ internal class ArMeasurementActivity : ComponentActivity() {
         val header = panel().apply {
             addView(label(19f).apply {
                 text = when {
-                    tankShape != null -> "Tanque em AR"
-                    areaMode -> "Área em AR"
-                    else -> "Régua em AR"
+                    tankShape != null -> "Tanque no ambiente"
+                    areaMode -> "Área no ambiente"
+                    else -> "Régua no ambiente"
                 }
                 typeface = Typeface.DEFAULT_BOLD
             })
@@ -343,6 +354,12 @@ internal class ArMeasurementActivity : ComponentActivity() {
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    private fun cameraTouch(x: Float,y: Float): Pair<Float,Float>? {
+        val from = IntArray(2).also(overlay::getLocationInWindow)
+        val to = IntArray(2).also(surface::getLocationInWindow)
+        return CameraViewportMapping.cameraPoint(x,y,from[0],from[1],to[0],to[1],surface.width,surface.height)
+    }
 }
 
 // Formatting runs on the UI thread for the overlay, controls and history.
@@ -350,8 +367,7 @@ private val arNumber = NumberFormat.getNumberInstance(Locale("pt", "BR")).apply 
     maximumFractionDigits = 2
 }
 
-private fun formatArLength(meters: Double) =
-    if (meters < 1) "${arNumber.format(meters * 100)} cm" else "${arNumber.format(meters)} m"
+private fun formatArLength(meters: Double) = "${arNumber.format(meters * 100)} cm"
 
 private fun formatArArea(squareMeters: Double) =
     if (squareMeters < .01) "${arNumber.format(squareMeters * 10_000)} cm²"
@@ -360,9 +376,13 @@ private fun formatArArea(squareMeters: Double) =
 private class ArMeasurementOverlay(
     context: Context,
     private val updateControls: (ArMeasurementFrame) -> Unit,
+    private val onMove: (Int, Float, Float) -> Unit,
     onPoint: (Float, Float) -> Unit
 ) : View(context) {
+    var cameraView: View? = null
     @Volatile private var frame = ArMeasurementFrame()
+    private var displayedPoints = emptyList<android.graphics.PointF?>()
+    private var dragged: Int? = null
     private val lime = Color.rgb(192, 245, 101)
     private val density = resources.displayMetrics.density
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = lime; strokeWidth = 3 * density }
@@ -373,10 +393,21 @@ private class ArMeasurementOverlay(
         textAlign = Paint.Align.CENTER
     }
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onDown(e: MotionEvent) = true
+        override fun onDown(e: MotionEvent): Boolean {
+            dragged = displayedPoints.indices.filter { displayedPoints[it] != null }.minByOrNull {
+                val p = displayedPoints[it]!!
+                kotlin.math.hypot(p.x-e.x,p.y-e.y)
+            }?.takeIf { val p = displayedPoints[it]!!; kotlin.math.hypot(p.x-e.x,p.y-e.y) <= 30*density }
+            return true
+        }
+        override fun onScroll(e1: MotionEvent?,e2: MotionEvent,distanceX: Float,distanceY: Float): Boolean {
+            val index = dragged ?: return false
+            onMove(index,e2.x,e2.y)
+            return true
+        }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             performClick()
-            onPoint(e.x, e.y)
+            if (dragged == null) onPoint(e.x, e.y)
             return true
         }
     })
@@ -386,16 +417,29 @@ private class ArMeasurementOverlay(
         postInvalidateOnAnimation()
     }
 
-    override fun onTouchEvent(event: MotionEvent) = gestures.onTouchEvent(event)
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val handled = gestures.onTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) dragged = null
+        return handled
+    }
     override fun performClick() = super.performClick()
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val current = frame
         updateControls(current)
+        val camera = cameraView ?: return
+        val cameraOrigin = IntArray(2).also(camera::getLocationInWindow)
+        val overlayOrigin = IntArray(2).also(::getLocationInWindow)
+        val points = current.points.map { point -> point?.let {
+            CameraViewportMapping.overlayPoint(it.x/current.viewportWidth,it.y/current.viewportHeight,
+                overlayOrigin[0],overlayOrigin[1],cameraOrigin[0],cameraOrigin[1],camera.width,camera.height)
+                ?.let { mapped -> android.graphics.PointF(mapped.first,mapped.second) }
+        } }
+        displayedPoints = points
         current.sides.forEachIndexed { index, meters ->
-            val start = current.points[index] ?: return@forEachIndexed
-            val end = current.points[(index + 1) % current.points.size] ?: return@forEachIndexed
+            val start = points[index] ?: return@forEachIndexed
+            val end = points[(index + 1) % points.size] ?: return@forEachIndexed
             canvas.drawLine(start.x, start.y, end.x, end.y, line)
             val x = (start.x + end.x) / 2
             val y = (start.y + end.y) / 2
@@ -408,10 +452,10 @@ private class ArMeasurementOverlay(
                 canvas.drawText(text, x, y - (label.ascent() + label.descent()) / 2, label)
             }
         }
-        if (current.area != null && current.points.filterNotNull().size >= 3) {
-            val points = current.points.filterNotNull()
-            val centerX = points.map { it.x }.average().toFloat()
-            val centerY = points.map { it.y }.average().toFloat()
+        if (current.area != null && points.filterNotNull().size >= 3) {
+            val visible = points.filterNotNull()
+            val centerX = visible.map { it.x }.average().toFloat()
+            val centerY = visible.map { it.y }.average().toFloat()
             if (centerX in 0f..width.toFloat() && centerY in 0f..height.toFloat()) {
                 val caption = formatArArea(current.area)
                 val hw = label.measureText(caption) / 2 + 10 * density
@@ -422,7 +466,7 @@ private class ArMeasurementOverlay(
                     centerY - (label.ascent() + label.descent()) / 2, label)
             }
         }
-        for (point in current.points.filterNotNull()) {
+        for (point in points.filterNotNull()) {
             canvas.drawCircle(point.x, point.y, 7 * density, backing)
             canvas.drawCircle(point.x, point.y, 5 * density, line)
         }
