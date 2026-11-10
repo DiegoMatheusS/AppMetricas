@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.domain.LiveContourTracking
+import br.com.medidor.app.domain.CameraPreviewGeometry
 import br.com.medidor.app.domain.LiveContourStabilizer
 import br.com.medidor.app.domain.LiveContourCandidate
 import br.com.medidor.app.domain.LiveViewportMapping
@@ -116,6 +117,7 @@ internal fun LiveContourCamera(
     var firstCorner by remember { mutableStateOf<NormalizedPoint?>(null) }
     var drawnArea by remember { mutableStateOf<ContourNormalizedArea?>(null) }
     var overlay by remember { mutableStateOf<ContourOverlay?>(null) }
+    val latestOverlay by rememberUpdatedState(overlay)
     var capture by remember { mutableStateOf<ImageCapture?>(null) }
     var tolerance by remember { mutableStateOf(32) }
     val previewView = remember(context) {
@@ -369,9 +371,15 @@ internal fun LiveContourCamera(
             Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
                 detectTapGestures { touch ->
                     if (!showContours) return@detectTapGestures
-                    val n = LiveViewportMapping.point(touch.x,touch.y,
-                        size.width.toFloat(),size.height.toFloat())
-                        ?.let { NormalizedPoint(it.first,it.second) }
+                    val currentFrame = latestOverlay?.takeIf { it.width > 1 && it.height > 1 }
+                    val normalized = currentFrame?.let {
+                        CameraPreviewGeometry(
+                            it.width, it.height, size.width.toFloat(), size.height.toFloat()
+                        ).normalizedImagePoint(touch.x, touch.y)
+                    } ?: LiveViewportMapping.point(
+                        touch.x, touch.y, size.width.toFloat(), size.height.toFloat()
+                    )
+                    val n = normalized?.let { NormalizedPoint(it.first, it.second) }
                     if (n != null) {
                         val message = if (!areaMode) {
                             autoSearch = false
@@ -406,43 +414,54 @@ internal fun LiveContourCamera(
                     }
                 }
             }) {
-                val region = drawnArea
-                if (region != null) {
+                val currentFrame = overlay?.takeIf { it.width > 1 && it.height > 1 }
+                val geometry = currentFrame?.let {
+                    CameraPreviewGeometry(it.width, it.height, size.width, size.height)
+                }
+                // PreviewView uses FILL_CENTER: its image can be cropped, not stretched.
+                fun marker(nx: Float, ny: Float): Offset {
+                    val (x, y) = geometry?.normalizedViewPoint(nx, ny)
+                        ?: (size.width * nx to size.height * ny)
+                    return Offset(x, y)
+                }
+                drawnArea?.let { region ->
                     val color = Color(0xFFFFBF66)
-                    val left = size.width*region.left
-                    val right = size.width*region.right
-                    val top = size.height*region.top
-                    val bottom = size.height*region.bottom
-                    drawLine(color,Offset(left,top),Offset(right,top),2.dp.toPx())
-                    drawLine(color,Offset(right,top),Offset(right,bottom),2.dp.toPx())
-                    drawLine(color,Offset(right,bottom),Offset(left,bottom),2.dp.toPx())
-                    drawLine(color,Offset(left,bottom),Offset(left,top),2.dp.toPx())
+                    val a = marker(region.left, region.top)
+                    val b = marker(region.right, region.top)
+                    val c = marker(region.right, region.bottom)
+                    val d = marker(region.left, region.bottom)
+                    drawLine(color, a, b, 2.dp.toPx())
+                    drawLine(color, b, c, 2.dp.toPx())
+                    drawLine(color, c, d, 2.dp.toPx())
+                    drawLine(color, d, a, 2.dp.toPx())
                 }
                 firstCorner?.let { corner ->
-                    drawCircle(Color(0xFFFFBF66),7.dp.toPx(),
-                        Offset(size.width*corner.x,size.height*corner.y))
+                    drawCircle(Color(0xFFFFBF66), 7.dp.toPx(), marker(corner.x, corner.y))
                 }
-                tapMarker?.let { marker ->
-                    val pos = Offset(size.width * marker.x, size.height * marker.y)
+                tapMarker?.let { selected ->
+                    val pos = marker(selected.x, selected.y)
                     drawCircle(Color(0xFFFFBF66), 10.dp.toPx(), pos)
                     drawCircle(Color(0xFF14251F), 5.dp.toPx(), pos)
                 }
                 if (!showContours) return@Canvas
-                val frame = overlay ?: return@Canvas
-                val c = frame.contour ?: return@Canvas
+                val c = overlay?.contour ?: return@Canvas
+                val crop = CameraPreviewGeometry(c.width, c.height, size.width, size.height)
+                fun pixel(x: Float, y: Float): Offset {
+                    val (viewX, viewY) = crop.viewPoint(x, y)
+                    return Offset(viewX, viewY)
+                }
                 val color = Color(0xFFC0F565)
-                val top = size.height*c.minY.toFloat()/c.height
-                val bottom = size.height*(c.maxY+1f)/c.height
-                val left = size.width*c.minX.toFloat()/c.width
-                val right = size.width*(c.maxX+1f)/c.width
-                drawLine(color,Offset(left,top),Offset(right,top),3.dp.toPx())
-                drawLine(color,Offset(right,top),Offset(right,bottom),3.dp.toPx())
-                drawLine(color,Offset(right,bottom),Offset(left,bottom),3.dp.toPx())
-                drawLine(color,Offset(left,bottom),Offset(left,top),3.dp.toPx())
-                c.outline.forEach { p ->
-                    drawCircle(color,1.1.dp.toPx(),
-                        Offset(size.width*(p.x.toFloat()/c.width),
-                            size.height*(p.y.toFloat()/c.height)))
+                val a = pixel(c.minX.toFloat(), c.minY.toFloat())
+                val b = pixel(c.maxX + 1f, c.minY.toFloat())
+                val lowerRight = pixel(c.maxX + 1f, c.maxY + 1f)
+                val d = pixel(c.minX.toFloat(), c.maxY + 1f)
+                drawLine(color, a, b, 3.dp.toPx())
+                drawLine(color, b, lowerRight, 3.dp.toPx())
+                drawLine(color, lowerRight, d, 3.dp.toPx())
+                drawLine(color, d, a, 3.dp.toPx())
+                c.outline.forEach { point ->
+                    drawCircle(color, 1.1.dp.toPx(),
+                        pixel(point.x.toFloat(), point.y.toFloat()))
                 }
             }
         }
