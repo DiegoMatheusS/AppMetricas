@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import br.com.medidor.app.domain.CountRegion
+import br.com.medidor.app.domain.CameraPreviewGeometry
+import br.com.medidor.app.domain.LiveRegionStabilizer
 import br.com.medidor.app.domain.LiveObjectCounter
 import br.com.medidor.app.domain.LiveCountStabilizer
 import br.com.medidor.app.domain.PieceAppearance
@@ -143,6 +145,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
         var bound = false
         val future = if (owner != null) ProcessCameraProvider.getInstance(context) else null
         val stabilizer = LiveCountStabilizer()
+        val regionStabilizer = LiveRegionStabilizer()
         var previousGeneration = -1
         fun bind() {
             val camera = provider ?: return
@@ -172,11 +175,19 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                                 )
                                 if (version != previousGeneration) {
                                     stabilizer.reset()
+                                    regionStabilizer.reset()
                                     previousGeneration = version
                                 }
-                                val detected = if (exemplar == null) regions.size else
-                                    SimilarObjectCounter.matches(exemplar, regions).size
+                                val selectedRegions = if (exemplar == null) regions else
+                                    SimilarObjectCounter.matches(exemplar, regions)
+                                val detected = selectedRegions.size
+                                // A constant number is not enough: objects must remain
+                                // at the same positions for consecutive camera frames.
+                                val positionsStable = regionStabilizer.update(
+                                    selectedRegions, sampled.width, sampled.height
+                                )
                                 val confirmed = stabilizer.update(detected)
+                                    ?.takeIf { it == detected && positionsStable }
                                 main.execute {
                                     if (!disposed.get() && !locked.get() && version == generation.get()) {
                                         result = CountFrame(
@@ -197,6 +208,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                         }
                     } catch (_: Exception) {
                         stabilizer.reset()
+                        regionStabilizer.reset()
                         main.execute { if (!disposed.get()) {
                             stableCount = null
                             error = "Não foi possível analisar esta imagem. Use Por foto para conferir a contagem."
@@ -272,16 +284,19 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
 
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             AndroidView(factory = { preview }, modifier = Modifier.fillMaxSize())
-            frozenPhoto?.let { Image(it.asImageBitmap(),"Imagem fixada dos objetos",Modifier.fillMaxSize(),contentScale = ContentScale.FillBounds) }
+            frozenPhoto?.let { Image(it.asImageBitmap(),"Imagem fixada dos objetos",Modifier.fillMaxSize(),contentScale = ContentScale.Crop) }
             Canvas(
                 Modifier.fillMaxSize().pointerInput(Unit) {
                     detectTapGestures { position ->
                         val frame = latestFrame ?: return@detectTapGestures
                         if (size.width <= 0 || size.height <= 0) return@detectTapGestures
-                        val x = (position.x * frame.width / size.width).toInt()
-                            .coerceIn(0, frame.width - 1)
-                        val y = (position.y * frame.height / size.height).toInt()
-                            .coerceIn(0, frame.height - 1)
+                        val geometry = CameraPreviewGeometry(
+                            frame.width, frame.height, size.width.toFloat(), size.height.toFloat()
+                        )
+                        val pixel = geometry.imagePoint(position.x, position.y)
+                            ?: return@detectTapGestures
+                        val x = pixel.first.toInt().coerceIn(0, frame.width - 1)
+                        val y = pixel.second.toInt().coerceIn(0, frame.height - 1)
                         val selected = LiveObjectCounter.selectAt(frame.pixels, frame.width, frame.height, x, y, sensitivity)
                             ?: SimilarObjectCounter.at(frame.regions, x, y)
                         val exemplar = selected?.let(SimilarObjectCounter::appearance)
@@ -305,16 +320,19 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                 }
             ) {
                 val frame = result ?: return@Canvas
+                val geometry = CameraPreviewGeometry(
+                    frame.width, frame.height, size.width, size.height
+                )
                 frame.regions.forEach { region ->
                     val matching = reference?.let {
                         SimilarObjectCounter.matches(it, region)
                     } == true
                     val color = if (matching) lime else
                         Color.White.copy(alpha = .5f)
-                    val left = size.width * region.left / frame.width
-                    val top = size.height * region.top / frame.height
-                    val right = size.width * (region.right + 1f) / frame.width
-                    val bottom = size.height * (region.bottom + 1f) / frame.height
+                    val (left, top) = geometry.viewPoint(region.left.toFloat(), region.top.toFloat())
+                    val (right, bottom) = geometry.viewPoint(
+                        region.right + 1f, region.bottom + 1f
+                    )
                     val stroke = if (matching) 3.dp.toPx() else 1.5.dp.toPx()
                     drawLine(color, Offset(left, top), Offset(right, top), stroke)
                     drawLine(color, Offset(right, top), Offset(right, bottom), stroke)
@@ -323,10 +341,8 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                     region.outline.forEach { p ->
                         drawCircle(
                             color, 1.2.dp.toPx(),
-                            Offset(
-                                size.width * p.x / frame.width,
-                                size.height * p.y / frame.height
-                            )
+                            geometry.viewPoint(p.x.toFloat(), p.y.toFloat())
+                                .let { Offset(it.first, it.second) }
                         )
                     }
                 }
