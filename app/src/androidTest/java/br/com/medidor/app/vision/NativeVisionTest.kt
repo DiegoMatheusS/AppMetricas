@@ -67,6 +67,28 @@ class NativeVisionTest {
         assertTrue(model.vertices.maxOf { it.z } - model.vertices.minOf { it.z } > .02)
     }
 
+    @Test fun recognizesAngledWallsUnderUnevenLighting() {
+        val bitmap = Bitmap.createBitmap(600, 400, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(600 * 400) { index ->
+            val value = 140 + (index % 600) / 6
+            Color.rgb(value, value, value)
+        }
+        bitmap.setPixels(pixels, 0, 600, 0, 0, 600, 400)
+        Canvas(bitmap).apply {
+            rotate(17f, 300f, 200f)
+            drawRect(130f, 100f, 470f, 300f, Paint().apply {
+                color = Color.rgb(30, 30, 30); strokeWidth = 8f; style = Paint.Style.STROKE
+            })
+        }
+        val floor = PlanFloor("Inclinado", imageWidth = 600, imageHeight = 400, knownMeters = 4.0,
+            referenceStart = PlanPoint(.1f, .1f), referenceEnd = PlanPoint(.9f, .1f))
+        try {
+            val draft = PlanImageRecognition.detect(bitmap, floor)
+            assertTrue("Paredes: ${draft.walls}", draft.walls.size >= 3)
+            assertTrue(draft.walls.any { abs(it.start.x - it.end.x) > .1 && abs(it.start.y - it.end.y) > .1 })
+        } finally { bitmap.recycle() }
+    }
+
     @Test fun identicalPhotographsDoNotCreateInventedDepth() {
         val result = runCatching {
             PhotoReconstruction.reconstruct(listOf(0, 1, 2), 60.0,

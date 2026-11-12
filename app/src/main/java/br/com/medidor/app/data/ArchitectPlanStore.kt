@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.SystemClock
+import android.util.AtomicFile
 import br.com.medidor.app.domain.ArchitectPlan
 import br.com.medidor.app.domain.PlanFloor
 import br.com.medidor.app.domain.PlanPoint
@@ -15,12 +16,11 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Early local-only architect project storage. Each imported image is saved in
- * app-private files, no external upload and no storage permission needed.
- * JSON is intentionally versioned before eventual Room migration.
+ * Versioned documents in transactional SQLite slots; imported images use
+ * atomic, app-private files. Existing preferences are retained during migration.
  */
 class ArchitectPlanStore(private val context: Context) {
-    private val prefs = context.getSharedPreferences("architect_plan_v1", Context.MODE_PRIVATE)
+    private val prefs = LocalDocuments(context, "architect_plan_v1")
     private val folder = File(context.filesDir, "architect").apply { mkdirs() }
 
     fun load(): ArchitectPlan {
@@ -132,9 +132,13 @@ class ArchitectPlanStore(private val context: Context) {
         // Unique file name; never overwrite a shared image used by a duplicated floor.
         val fileName = "planta_${System.currentTimeMillis()}_${SystemClock.elapsedRealtimeNanos()}.jpg"
         val file = File(folder, fileName)
-        file.outputStream().use {
-            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)) { "Falha ao salvar imagem" }
-        }
+        val atomic = AtomicFile(file)
+        val stream = atomic.startWrite()
+        try {
+            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)) { "Falha ao salvar imagem" }
+            atomic.finishWrite(stream)
+            check(file.isFile && file.length() > 0) { "Não foi possível concluir a gravação da planta." }
+        } catch (error: Exception) { atomic.failWrite(stream); throw error }
         return fileName
     }
 

@@ -12,6 +12,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import br.com.medidor.app.data.LocalHistory
+import br.com.medidor.app.data.ProBilling
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import br.com.medidor.app.domain.TankCameraCapture
 
 enum class Destination(val label: String) {
@@ -47,6 +52,15 @@ enum class LiveMeasureTool { RULER, AREA, TANK }
 @Composable
 fun AppShell() {
     val context = LocalContext.current
+    val billing = remember(context) { ProBilling(context.applicationContext) }
+    val billingState = billing.state
+    val owner = context as? ComponentActivity
+    DisposableEffect(billing, owner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) billing.refresh() }
+        owner?.lifecycle?.addObserver(observer)
+        billing.refresh()
+        onDispose { owner?.lifecycle?.removeObserver(observer); billing.close() }
+    }
     val store = remember(context) { LocalHistory(context.applicationContext) }
     var navigation by rememberSaveable { mutableStateOf(listOf(Destination.HOME.name)) }
     val destination = Destination.entries.firstOrNull { it.name == navigation.lastOrNull() }
@@ -96,8 +110,13 @@ fun AppShell() {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             screenState.SaveableStateProvider(destination.name) {
+            val requiresPro = destination in setOf(Destination.SCANNER, Destination.ARCHITECT,
+                Destination.ARCHITECT_SCAN, Destination.ARCHITECT_REVIEW, Destination.COUNT, Destination.TANK_CAMERA)
+            if (requiresPro && billingState.configured && !billingState.owned) ProScreen(billing, ::goBack)
+            else
             when (destination) {
-                Destination.HOME -> HomeScreen(onOpen = ::navigate, records = records)
+                Destination.HOME -> HomeScreen(onOpen = ::navigate, records = records,
+                    proLocked = billingState.configured && !billingState.owned)
                 Destination.RULER, Destination.AREA, Destination.TANK_CAMERA,
                 Destination.PHOTO -> CameraMeasurementScreen(
                     onSave = ::addRecord,
@@ -136,7 +155,7 @@ fun AppShell() {
                     onDeleteAll = { store.clear(); records = emptyList() },
                     onDeleteOne = { index -> records = store.deleteAt(index) }
                 )
-                Destination.PRO -> ProScreen()
+                Destination.PRO -> ProScreen(billing)
                 Destination.ARCHITECT -> ArchitectScreen()
                 Destination.ARCHITECT_SCAN -> ArchitectScanScreen(
                     onBack = ::goBack,

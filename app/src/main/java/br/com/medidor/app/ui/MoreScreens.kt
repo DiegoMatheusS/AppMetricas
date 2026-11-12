@@ -34,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.medidor.app.data.MeasurementRecord
+import br.com.medidor.app.data.ProBilling
+import android.app.Activity
 
 @Composable
 fun HistoryScreen(
@@ -126,22 +128,31 @@ fun HistoryScreen(
 }
 
 @Composable
-fun ProScreen() {
+internal fun ProScreen(billing: ProBilling, onBack: (() -> Unit)? = null) {
+    val state = billing.state
+    val activity = LocalContext.current as? Activity
     Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        onBack?.let { TextButton(onClick = it) { Text("‹ Voltar") } }
         Text("Pro Completo", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        ResultCard("Preço de lançamento previsto", "R$ 129,90 • Compra única")
-        Text("Funcionalidades previstas para desbloqueio completo:", style = MaterialTheme.typography.titleMedium)
+        ResultCard(if (state.owned) "Pro ativado" else "Compra única, sem mensalidade",
+            if (state.owned) "Disponível nesta conta da Google Play" else state.price ?: "Preço disponível pela Google Play")
+        Text("Ferramentas incluídas:", style = MaterialTheme.typography.titleMedium)
         listOf(
-            "Scanner 3D completo",
+            "Scanner 3D com exportação OBJ",
             "Modo Arquiteto com AR e vários andares",
-            "Contador automático de objetos por IA local",
-            "Ferramentas industriais avançadas",
-            "Relatórios técnicos e exportação 3D"
+            "Contagem assistida de peças pela câmera",
+            "Tanques pela câmera"
         ).forEach { Text("• $it") }
         HorizontalDivider()
-        Text("Em desenvolvimento — compras ainda não estão disponíveis.",
-            color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-        Text("O aplicativo não cobra e não simula acesso Pro. A compra única será integrada à Google Play com validação e restauração.",
+        if (!state.owned) Button(enabled = state.configured && state.canBuy && !state.busy && activity != null,
+            onClick = { activity?.let(billing::buy) }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.pending) "Aguardando pagamento" else state.price?.let { "Comprar por $it" } ?: "Comprar pela Google Play")
+        }
+        OutlinedButton(enabled = state.configured && !state.busy, onClick = { billing.refresh(true) },
+            modifier = Modifier.fillMaxWidth()) { Text("Restaurar compra") }
+        if (state.busy) Text("Conferindo a Google Play…")
+        state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        Text("Use a mesma conta da Google Play para restaurar. Pagamentos pendentes só liberam o Pro após confirmação.",
             style = MaterialTheme.typography.bodySmall)
     }
 }

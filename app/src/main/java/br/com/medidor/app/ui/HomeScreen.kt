@@ -41,7 +41,8 @@ private val HomeLime = Color(0xFFC0F565)
 @Composable
 fun HomeScreen(
     onOpen: (Destination) -> Unit,
-    records: List<MeasurementRecord> = emptyList()
+    records: List<MeasurementRecord> = emptyList(),
+    proLocked: Boolean = false
 ) {
     Column(Modifier.fillMaxSize().background(HomeBackground)) {
         Column(
@@ -94,11 +95,13 @@ fun HomeScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeToolCard(
                     title = "Tanques",
+                    pro = proLocked,
                     symbol = "▢", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.TANK_CAMERA) }
                 )
                 HomeToolCard(
                     title = "Arquiteto",
+                    pro = proLocked,
                     symbol = "◇", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.ARCHITECT_SCAN) }
                 )
@@ -107,11 +110,13 @@ fun HomeScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeToolCard(
                     title = "Contar peças",
+                    pro = proLocked,
                     symbol = "◎", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.COUNT) }
                 )
                 HomeToolCard(
                     title = "Scanner 3D",
+                    pro = proLocked,
                     symbol = "◈", modifier = Modifier.weight(1f),
                     onClick = { onOpen(Destination.SCANNER) }
                 )
@@ -173,6 +178,7 @@ fun HomeScreen(
 private fun HomeToolCard(
     title: String, symbol: String,
     modifier: Modifier = Modifier,
+    pro: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
@@ -186,7 +192,7 @@ private fun HomeToolCard(
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(symbol, fontSize = 22.sp, color = HomeInk)
-                Text("↗", fontSize = 17.sp, color = HomeMuted)
+                Text(if (pro) "PRO ↗" else "↗", fontSize = if (pro) 12.sp else 17.sp, color = HomeMuted)
             }
             Column {
                 Text(title, color = HomeInk, fontWeight = FontWeight.Medium,

@@ -3,6 +3,7 @@ package br.com.medidor.app.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.AtomicFile
 import br.com.medidor.app.domain.ScannerCaptureGuide
 import br.com.medidor.app.domain.ScannerSessionArchive
 import br.com.medidor.app.domain.ScannerPhotoQuality
@@ -34,8 +35,7 @@ data class ScannerSession(
  */
 class ScannerSessionStore(context: Context) {
     private val appContext = context.applicationContext
-    private val prefs = appContext
-        .getSharedPreferences("scanner_capture_v1", Context.MODE_PRIVATE)
+    private val prefs = LocalDocuments(appContext, "scanner_capture_v1")
     private val folder = File(appContext.filesDir, "scanner").apply { mkdirs() }
 
     @Synchronized fun list(): List<ScannerSession> {
@@ -102,11 +102,14 @@ class ScannerSessionStore(context: Context) {
         val filename = "scan_${UUID.randomUUID()}.jpg"
         val target = File(folder, filename)
         try {
-            target.outputStream().use { stream ->
+            val atomic = AtomicFile(target)
+            val stream = atomic.startWrite()
+            try {
                 check(bitmap.compress(Bitmap.CompressFormat.JPEG, 86, stream)) {
                     "Não foi possível salvar a foto."
                 }
-            }
+                atomic.finishWrite(stream)
+            } catch (error: Exception) { atomic.failWrite(stream); throw error }
             require(target.length() in 1..MAX_SHOT_BYTES) {
                 "Fotografia grande demais (máximo 8 MB)."
             }

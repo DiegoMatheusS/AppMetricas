@@ -21,7 +21,9 @@ internal object PlanImageRecognition {
                 val binary = scope.own(Mat())
                 Utils.bitmapToMat(small, rgba)
                 Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
-                Imgproc.threshold(gray, binary, 0.0, 255.0, Imgproc.THRESH_BINARY_INV or Imgproc.THRESH_OTSU)
+                require(gray.cols() >= 32 && gray.rows() >= 32) { "Use uma imagem maior para reconhecer a planta." }
+                Imgproc.adaptiveThreshold(gray, binary, 255.0, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    Imgproc.THRESH_BINARY_INV, 31, 10.0)
                 val w = gray.cols()
                 val h = gray.rows()
                 val ink = ByteArray(w * h)
@@ -117,6 +119,23 @@ internal object PlanImageRecognition {
                         }
                     }
                 }
+                // Keep arbitrary angles in their original coordinates; the user reviews the same photo.
+                val diagonal = scope.own(Mat())
+                Imgproc.HoughLinesP(binary, diagonal, 1.0, Math.PI / 360, 35,
+                    maxOf(20.0, minOf(w, h) * .10), 3.0)
+                val angled = mutableListOf<PlanWall>()
+                for (row in 0 until minOf(diagonal.rows(), 1000)) {
+                    val line = diagonal.get(row, 0)
+                    val dx = line[2] - line[0]; val dy = line[3] - line[1]
+                    val length = kotlin.math.hypot(dx, dy)
+                    if (length / pixelsPerMeter < .25 || abs(dx) / length < .14 || abs(dy) / length < .14) continue
+                    if (minOf(line[0], line[2]) <= 2 || minOf(line[1], line[3]) <= 2 ||
+                        maxOf(line[0], line[2]) >= w - 2 || maxOf(line[1], line[3]) >= h - 2) continue
+                    angled += PlanWall(PlanPoint((line[0] / w).toFloat(), (line[1] / h).toFloat()),
+                        PlanPoint((line[2] / w).toFloat(), (line[3] / h).toFloat()))
+                }
+                walls += AngledPlanWalls.merge(angled, w, h, (.13 * pixelsPerMeter).coerceIn(2.0, 12.0))
+                    .take((300 - walls.size).coerceAtLeast(0))
                 PlanRecognitionDraft(walls, openings)
             }
         } finally { if (small !== bitmap) small.recycle() }

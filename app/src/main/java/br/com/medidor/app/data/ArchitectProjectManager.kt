@@ -9,7 +9,7 @@ data class ArchitectProjectItem(val id: String, val name: String)
 
 /**
  * Non-destructive multi-project layer over ArchitectPlanStore's original
- * SharedPreferences "plan" slot. That slot is always the active document,
+ * "plan" document slot. That slot is always the active document,
  * including for the AR Activity, while inactive documents are snapshots.
  *
  * The old single-document key is NOT deleted during migration. Project
@@ -18,9 +18,7 @@ data class ArchitectProjectItem(val id: String, val name: String)
  * project intentionally leaves orphaned image files for a later safe GC.
  */
 class ArchitectProjectManager(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(
-        "architect_plan_v1", Context.MODE_PRIVATE
-    )
+    private val prefs = LocalDocuments(context, "architect_plan_v1")
     private val indexKey = "project_index_v1"
     private val activeKey = "active_project_v1"
     private fun archive(id: String) = "project_snapshot_$id"
@@ -43,8 +41,8 @@ class ArchitectProjectManager(context: Context) {
             }
         }.toString()
 
-    private fun initialize() {
-        if (prefs.contains(indexKey)) return
+    private fun initialize() = prefs.transaction {
+        if (prefs.contains(indexKey)) return@transaction
         val initial = listOf(ArchitectProjectItem("default", "Meu primeiro projeto"))
         check(prefs.edit().putString(indexKey, serializeIndex(initial))
             .putString(activeKey, "default").commit()) {
@@ -69,7 +67,7 @@ class ArchitectProjectManager(context: Context) {
             "Use um nome de projeto entre 1 e 60 caracteres."
         } }
 
-    fun rename(id: String, name: String) {
+    fun rename(id: String, name: String) = prefs.transaction {
         val safe = cleanName(name)
         val items = list()
         require(items.any { it.id == id }) { "Projeto não encontrado." }
@@ -80,7 +78,7 @@ class ArchitectProjectManager(context: Context) {
     }
 
     /** Creates a new empty project or an exact copy of the current project's JSON. */
-    fun create(name: String, copyCurrent: Boolean): ArchitectProjectItem {
+    fun create(name: String, copyCurrent: Boolean): ArchitectProjectItem = prefs.transaction {
         val safe = cleanName(name)
         val items = list()
         require(items.size < 20) { "Limite de 20 projetos locais atingido." }
@@ -95,11 +93,11 @@ class ArchitectProjectManager(context: Context) {
         if (copyCurrent && currentPayload != null) editor.putString("plan", currentPayload)
         else editor.remove("plan")
         check(editor.commit()) { "Não foi possível criar o projeto." }
-        return next
+        next
     }
 
-    fun select(id: String) {
-        if (id == activeId()) return
+    fun select(id: String) = prefs.transaction {
+        if (id == activeId()) return@transaction
         val items = list()
         require(items.any { it.id == id }) { "Projeto não encontrado." }
         val previous = activeId()
@@ -113,7 +111,7 @@ class ArchitectProjectManager(context: Context) {
         check(editor.commit()) { "Não foi possível abrir o projeto." }
     }
 
-    fun delete(id: String) {
+    fun delete(id: String) = prefs.transaction {
         val items = list()
         require(items.size > 1) { "Não é permitido apagar o último projeto." }
         require(items.any { it.id == id }) { "Projeto não encontrado." }

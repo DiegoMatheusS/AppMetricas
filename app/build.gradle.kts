@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+fun configString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+    .replace("\n", "\\n").replace("\r", "\\r") + "\""
+
 android {
     namespace = "br.com.medidor.app"
     compileSdk = 37
@@ -14,6 +17,8 @@ android {
         versionCode = System.getenv("APPMETRICAS_VERSION_CODE")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         versionName = System.getenv("APPMETRICAS_VERSION_NAME") ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "PLAY_PRODUCT_ID", configString(System.getenv("APPMETRICAS_PLAY_PRODUCT_ID")?.takeIf { it.isNotBlank() } ?: "pro_completo"))
+        buildConfigField("String", "PLAY_LICENSE_KEY", configString(System.getenv("APPMETRICAS_PLAY_LICENSE_KEY") ?: ""))
     }
 
     // Signed releases require secrets at build time. Never commit the keystore.
@@ -46,7 +51,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 dependencies {
@@ -66,6 +71,7 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     implementation("com.google.ar:core:1.56.0")
     implementation("org.opencv:opencv:4.13.0")
+    implementation("com.android.billingclient:billing:9.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")

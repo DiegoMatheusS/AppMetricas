@@ -13,12 +13,9 @@ data class MeasurementRecord(
     val createdAt: String
 )
 
-/**
- * Local prototype persistence without registration/server.
- * Replace with Room before adding complex project editing and migration.
- */
+/** Local history, migrated without deleting the original preferences. */
 class LocalHistory(context: Context) {
-    private val prefs = context.getSharedPreferences("measurements_v1", Context.MODE_PRIVATE)
+    private val prefs = LocalDocuments(context, "measurements_v1")
 
     fun load(): List<MeasurementRecord> = try {
         val array = JSONArray(prefs.getString("records", "[]") ?: "[]")
@@ -34,22 +31,22 @@ class LocalHistory(context: Context) {
         emptyList()
     }
 
-    fun save(title: String, details: String): List<MeasurementRecord> {
+    fun save(title: String, details: String): List<MeasurementRecord> = prefs.transaction {
         val timestamp = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR")).format(Date())
         val updated = listOf(MeasurementRecord(title, details, timestamp)) + load()
         val limited = updated.take(100)
         persist(limited)
-        return limited
+        limited
     }
 
     fun clear() = prefs.edit().remove("records").apply()
 
-    fun deleteAt(index: Int): List<MeasurementRecord> {
+    fun deleteAt(index: Int): List<MeasurementRecord> = prefs.transaction {
         val current = load()
-        if (index !in current.indices) return current
+        if (index !in current.indices) return@transaction current
         val updated = current.toMutableList().apply { removeAt(index) }
         persist(updated)
-        return updated
+        updated
     }
 
     private fun persist(records: List<MeasurementRecord>) {

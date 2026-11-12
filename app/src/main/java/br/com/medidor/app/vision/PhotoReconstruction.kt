@@ -5,6 +5,8 @@ import br.com.medidor.app.domain.MeshGeometry
 import br.com.medidor.app.domain.MeshTriangle
 import br.com.medidor.app.domain.Point3d
 import br.com.medidor.app.domain.ReconstructedMesh
+import br.com.medidor.app.domain.MultiViewRefinement
+import br.com.medidor.app.domain.ReprojectionObservation
 import org.opencv.android.Utils
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.*
@@ -34,25 +36,38 @@ internal object PhotoReconstruction {
         require(fieldOfView.isFinite() && fieldOfView in 25.0..100.0) { "Campo de visão inválido." }
         NativeVision.requireAvailable()
         return MatScope().use { scope ->
-            val views = slots.mapNotNull { slot ->
-                progress("Localizando detalhes na foto ${slot + 1}…")
+            fun extractViews(enhance: Boolean): List<View> = slots.mapNotNull { slot ->
+                progress(if (enhance) "Realçando detalhes na foto ${slot + 1}…" else "Localizando detalhes na foto ${slot + 1}…")
                 val bitmap = load(slot) ?: return@mapNotNull null
-                try { extract(bitmap, slot, fieldOfView, scope) } finally { bitmap.recycle() }
+                try { extract(bitmap, slot, fieldOfView, scope, enhance) } finally { bitmap.recycle() }
             }
+            var enhanced = false
+            var views = extractViews(false)
+            if (views.size < 3) { views = extractViews(true); enhanced = true }
             require(views.size >= 3) { "Faltam fotos com detalhes suficientes. Fotografe mais perto e com boa iluminação." }
             val matches = mutableMapOf<Pair<Int, Int>, List<Match>>()
             fun pair(a: Int, b: Int): List<Match> = matches.getOrPut(a to b) { match(views[a], views[b]) }
-            val candidates = views.indices.flatMap { a ->
-                (a + 1..minOf(a + 2, views.lastIndex)).map { b -> a to b }
-            }.sortedByDescending { (a, b) -> pair(a, b).size }
             val vertices = mutableListOf<Point3d>()
-            var initialized = false
-            for ((a, b) in candidates.take(10)) {
-                progress("Calculando profundidade entre as fotos ${views[a].slot + 1} e ${views[b].slot + 1}…")
-                if (initialize(views[a], views[b], pair(a, b), vertices)) {
-                    initialized = true
-                    break
+            fun seed(): Boolean {
+                if (views.size < 3) return false
+                val candidates = views.indices.flatMap { a ->
+                    (a + 1..minOf(a + 3, views.lastIndex)).map { b -> a to b } +
+                        listOfNotNull((views.lastIndex - a).takeIf { it > a }?.let { a to it })
+                }.distinct().map { (a, b) ->
+                    progress("Conferindo sobreposição das fotos ${views[a].slot + 1} e ${views[b].slot + 1}…")
+                    (a to b) to pair(a, b).size
+                }.sortedByDescending { it.second }.map { it.first }
+                for ((a, b) in candidates.take(10)) {
+                    progress("Calculando profundidade entre as fotos ${views[a].slot + 1} e ${views[b].slot + 1}…")
+                    if (initialize(views[a], views[b], pair(a, b), vertices)) return true
                 }
+                return false
+            }
+            var initialized = seed()
+            if (!initialized && !enhanced) {
+                views = extractViews(true)
+                matches.clear(); vertices.clear()
+                initialized = seed()
             }
             require(initialized) { "Não encontrei profundidade consistente. Mova a câmera entre as fotos mantendo o objeto imóvel e visível." }
             var added: Boolean
@@ -70,23 +85,55 @@ internal object PhotoReconstruction {
                     added = true
                 }
             } while (added && views.any { it.pose == null })
+            progress("Refinando os pontos entre todas as fotografias…")
+            val observations = List(vertices.size) { mutableListOf<ReprojectionObservation>() }
+            views.filter { it.pose != null }.forEach { view ->
+                view.tracks.forEachIndexed { feature, track -> if (track >= 0) {
+                    val pixel = view.normalized(feature)
+                    observations[track] += ReprojectionObservation(checkNotNull(view.pose), pixel.x, pixel.y, view.focal)
+                } }
+            }
+            val refined = vertices.mapIndexed { index, point ->
+                if (index % 100 == 0) progress("Refinando ponto ${index + 1}/${vertices.size}…")
+                MultiViewRefinement.refine(point, observations[index])
+            }
+            val mapping = IntArray(vertices.size) { -1 }
+            val filtered = mutableListOf<Point3d>()
+            refined.forEachIndexed { index, point -> if (point != null) {
+                mapping[index] = filtered.size; filtered += point
+            } }
+            require(filtered.size >= 25) { "Poucos pontos coerentes. Fotografe o objeto com mais detalhes e sobreposição." }
+            views.forEach { view -> view.tracks.indices.forEach { feature ->
+                val old = view.tracks[feature]
+                if (old >= 0) {
+                    val point = refined[old]
+                    val pixel = view.normalized(feature)
+                    view.tracks[feature] = if (point != null && view.pose != null &&
+                        MultiViewRefinement.residual(point, ReprojectionObservation(checkNotNull(view.pose), pixel.x, pixel.y, view.focal)) <= 3)
+                        mapping[old] else -1
+                }
+            } }
             progress("Construindo a superfície 3D…")
-            buildMesh(views, vertices, slots.size, fieldOfView).also { it.validate() }
+            buildMesh(views, filtered, slots.size, fieldOfView).also { it.validate() }
         }
     }
 
-    private fun extract(bitmap: Bitmap, slot: Int, fov: Double, scope: MatScope): View? {
+    private fun extract(bitmap: Bitmap, slot: Int, fov: Double, scope: MatScope, enhance: Boolean): View? {
         val rgba = scope.own(Mat())
         val gray = scope.own(Mat())
         Utils.bitmapToMat(bitmap, rgba)
         Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+        if (enhance) {
+            val contrast = Imgproc.createCLAHE(2.0, Size(8.0, 8.0))
+            try { contrast.apply(gray, gray) } finally { contrast.collectGarbage(); contrast.clear() }
+        }
         val mask = scope.own(Mat.zeros(gray.size(), CvType.CV_8UC1))
         // Avoid the outer background. Capture guidance asks to fill this central region.
         Imgproc.rectangle(mask, Point(gray.cols() * .08, gray.rows() * .08),
             Point(gray.cols() * .92, gray.rows() * .92), Scalar(255.0), -1)
         val keypoints = scope.own(MatOfKeyPoint())
         val descriptors = scope.own(Mat())
-        val detector = ORB.create(1800)
+        val detector = ORB.create(if (enhance) 2400 else 1800)
         try { detector.detectAndCompute(gray, mask, keypoints, descriptors) } finally { detector.clear() }
         val points = keypoints.toList()
         if (points.size < 50 || descriptors.empty()) return null

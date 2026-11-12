@@ -20,34 +20,12 @@ object LiveObjectCounter {
                reference: PieceAppearance? = null): List<CountRegion> {
         require(width in 8..512 && height in 8..512 && pixels.size == width * height)
         require(sensitivity in 15..100)
-        val rs = IntArray(256); val gs = IntArray(256); val bs = IntArray(256)
-        var samples = 0
-        for (y in 0 until height) for (x in 0 until width) {
-            if (x < 3 || y < 3 || x >= width - 3 || y >= height - 3) {
-                val p = pixels[y * width + x]
-                rs[(p ushr 16) and 255]++
-                gs[(p ushr 8) and 255]++
-                bs[p and 255]++
-                samples++
-            }
-        }
-        fun median(hist: IntArray): Int {
-            var total = 0
-            for (i in hist.indices) {
-                total += hist[i]
-                if (total > samples / 2) return i
-            }
-            return 255
-        }
-        val bgR = median(rs); val bgG = median(gs); val bgB = median(bs)
+        val background = if (reference == null) BorderBackground.fit(pixels, width, height) else null
         val raw = BooleanArray(pixels.size)
         for (i in pixels.indices) {
             val p = pixels[i]
-            raw[i] = if (reference == null) maxOf(
-                abs(((p ushr 16) and 255) - bgR),
-                abs(((p ushr 8) and 255) - bgG),
-                abs((p and 255) - bgB)
-            ) >= sensitivity else maxOf(
+            raw[i] = if (reference == null)
+                checkNotNull(background).difference(p, i % width, i / width) >= sensitivity else maxOf(
                 abs(((p ushr 16) and 255) - reference.red),
                 abs(((p ushr 8) and 255) - reference.green),
                 abs((p and 255) - reference.blue)
@@ -68,9 +46,22 @@ object LiveObjectCounter {
             region?.takeIf { SimilarObjectCounter.matches(reference, it) }?.area?.toDouble()
         }.sorted()
         // Learn the current image scale from intact matching pieces before splitting joined regions.
-        val area = matchingAreas.getOrNull(matchingAreas.size / 2) ?: referenceArea ?: reference?.area
+        val inferred = if (reference == null && described.size >= 3) {
+            val intact = described.mapNotNull { it.second }.sortedBy { it.area }
+            intact.firstNotNullOfOrNull { exemplar ->
+                val appearance = SimilarObjectCounter.appearance(exemplar) ?: return@firstNotNullOfOrNull null
+                val peers = intact.filter { SimilarObjectCounter.matches(appearance, it) &&
+                    it.area.toDouble() / exemplar.area in .75..1.3 }
+                peers.takeIf { it.size >= 2 }?.map { it.area.toDouble() }?.average()?.let { it to appearance }
+            }
+        } else null
+        val area = matchingAreas.getOrNull(matchingAreas.size / 2) ?: referenceArea ?: reference?.area ?: inferred?.first
         val regions = described.flatMap { (component, region) ->
-            if (area == null || component.size < area * 1.65) listOfNotNull(region) else
+            val similarColor = inferred == null || reference != null || referenceArea != null || region?.let {
+                maxOf(abs(it.meanRed - inferred.second.red), abs(it.meanGreen - inferred.second.green),
+                    abs(it.meanBlue - inferred.second.blue)) <= 35
+            } == true
+            if (area == null || component.size < area * 1.65 || !similarColor) listOfNotNull(region) else
                 PieceSegmentation.split(component, width, height, area)
                     .mapNotNull { indices -> describe(indices, pixels, width, height) }
         }
