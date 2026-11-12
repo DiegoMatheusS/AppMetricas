@@ -1,0 +1,81 @@
+name: Signed release APK
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Android CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  signed-apk:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK 37
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0" --channel=3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Check release signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.APPMETRICAS_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.APPMETRICAS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.APPMETRICAS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.APPMETRICAS_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD" || {
+            echo "Configure os quatro secrets de assinatura antes de executar." >&2
+            exit 1
+          }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/appmetricas-release.jks"
+          chmod 600 "$RUNNER_TEMP/appmetricas-release.jks"
+      - name: Test and build signed APK
+        env:
+          APPMETRICAS_KEYSTORE_PATH: ${{ runner.temp }}/appmetricas-release.jks
+          APPMETRICAS_KEYSTORE_PASSWORD: ${{ secrets.APPMETRICAS_KEYSTORE_PASSWORD }}
+          APPMETRICAS_KEY_ALIAS: ${{ secrets.APPMETRICAS_KEY_ALIAS }}
+          APPMETRICAS_KEY_PASSWORD: ${{ secrets.APPMETRICAS_KEY_PASSWORD }}
+          APPMETRICAS_VERSION_CODE: ${{ github.run_number }}
+          APPMETRICAS_VERSION_NAME: 0.1.${{ github.run_number }}
+          APPMETRICAS_PLAY_PRODUCT_ID: ${{ vars.APPMETRICAS_PLAY_PRODUCT_ID }}
+          APPMETRICAS_PLAY_LICENSE_KEY: ${{ vars.APPMETRICAS_PLAY_LICENSE_KEY }}
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
+      - name: Verify release APK certificate
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appmetricas-signed-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appmetricas-signed-bundle-${{ github.run_number }}
+          path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/appmetricas-release.jks"
