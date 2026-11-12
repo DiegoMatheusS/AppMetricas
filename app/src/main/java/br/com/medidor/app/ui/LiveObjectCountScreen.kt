@@ -55,11 +55,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import br.com.medidor.app.domain.CountRegion
 import br.com.medidor.app.domain.CameraPreviewGeometry
 import br.com.medidor.app.domain.LiveRegionStabilizer
 import br.com.medidor.app.domain.LiveObjectCounter
-import br.com.medidor.app.domain.LiveCountStabilizer
 import br.com.medidor.app.domain.PieceAppearance
 import br.com.medidor.app.domain.SimilarObjectCounter
 import java.util.concurrent.Executors
@@ -144,9 +145,18 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
         var provider: ProcessCameraProvider? = null
         var bound = false
         val future = if (owner != null) ProcessCameraProvider.getInstance(context) else null
-        val stabilizer = LiveCountStabilizer()
         val regionStabilizer = LiveRegionStabilizer()
         var previousGeneration = -1
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                generation.incrementAndGet()
+                if (!locked.get()) {
+                    result = null
+                    stableCount = null
+                }
+            }
+        }
+        owner?.lifecycle?.addObserver(lifecycleObserver)
         fun bind() {
             val camera = provider ?: return
             val viewport = preview.viewPort ?: return
@@ -160,13 +170,13 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                     .build()
                 var last = 0L
                 analysis.setAnalyzer(worker) { frame ->
+                    val version = generation.get()
                     try {
                         val now = SystemClock.elapsedRealtime()
                         if (!disposed.get() && !locked.get() && now - last >= 300) {
                             last = now
                             val sampled = LiveCameraFrameSampler.sample(frame)
                             if (sampled != null) {
-                                val version = generation.get()
                                 val exemplar = target.get()
                                 val regions = LiveObjectCounter.detect(
                                     sampled.pixels,
@@ -174,7 +184,6 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                                     threshold.get(), reference = exemplar
                                 )
                                 if (version != previousGeneration) {
-                                    stabilizer.reset()
                                     regionStabilizer.reset()
                                     previousGeneration = version
                                 }
@@ -184,10 +193,9 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                                 // A constant number is not enough: objects must remain
                                 // at the same positions for consecutive camera frames.
                                 val positionsStable = regionStabilizer.update(
-                                    selectedRegions, sampled.width, sampled.height
+                                    selectedRegions, sampled.width, sampled.height, now
                                 )
-                                val confirmed = stabilizer.update(detected)
-                                    ?.takeIf { it == detected && positionsStable }
+                                val confirmed = detected.takeIf { positionsStable }
                                 main.execute {
                                     if (!disposed.get() && !locked.get() && version == generation.get()) {
                                         result = CountFrame(
@@ -201,16 +209,22 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                                         error = null
                                     }
                                 }
-                            } else main.execute { if (!disposed.get()) {
-                                stableCount = null
-                                error = "Não foi possível ler as cores desta câmera. Use Por foto para contar."
-                            } }
+                            } else {
+                                regionStabilizer.reset()
+                                main.execute {
+                                    if (!disposed.get() && !locked.get() && version == generation.get()) {
+                                        stableCount = null
+                                        result = null
+                                        error = "Não foi possível ler as cores desta câmera. Use Por foto para contar."
+                                    }
+                                }
+                            }
                         }
                     } catch (_: Exception) {
-                        stabilizer.reset()
                         regionStabilizer.reset()
-                        main.execute { if (!disposed.get()) {
+                        main.execute { if (!disposed.get() && !locked.get() && version == generation.get()) {
                             stableCount = null
+                            result = null
                             error = "Não foi possível analisar esta imagem. Use Por foto para conferir a contagem."
                         } }
                     } finally {
@@ -247,6 +261,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
         if (future == null) error = "Activity de câmera indisponível."
         onDispose {
             disposed.set(true)
+            owner?.lifecycle?.removeObserver(lifecycleObserver)
             preview.removeOnLayoutChangeListener(listener)
             provider?.unbindAll()
             worker.shutdown()
@@ -277,6 +292,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                 generation.incrementAndGet()
                 stableCount = null
                 saved = false
+                selectionNotice = null
             }) {
                 Text("Nova leitura", color = lime)
             }
@@ -421,6 +437,7 @@ fun LiveObjectCountScreen(onSave: (String, String) -> Unit = { _, _ -> }, onPhot
                             reference = null
                             target.set(null)
                             saved = false
+                            selectionNotice = null
                         }
                     ) { Text(name, fontSize = 11.sp, color = lime) }
                 }

@@ -58,7 +58,7 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 
 ### Contagem de peças
 - Mostra objetos detectados sem exigir uma seleção inicial. Tocar em uma peça filtra por aparência/cor.
-- Após confirmar a quantidade em quadros consecutivos, fixa a imagem e a contagem; **Nova leitura** inicia outro escaneamento.
+- Após confirmar a quantidade, a posição e o tamanho das regiões em três quadros recentes, fixa a imagem e a contagem; **Nova leitura** inicia outro escaneamento. Uma cena vazia informa zero e continua buscando peças. Pausas, imagens ilegíveis e mudanças de resolução reiniciam a confirmação.
 - **Conferir foto** permite adicionar e remover marcações antes de salvar. A identificação continua aproximada e depende da imagem; não recupera peças ocultas.
 
 ### Versão Pro

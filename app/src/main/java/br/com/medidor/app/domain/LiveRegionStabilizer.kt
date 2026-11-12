@@ -7,32 +7,51 @@ package br.com.medidor.app.domain
  */
 internal class LiveRegionStabilizer(
     private val confirmations: Int = 3,
-    private val maximumMovementFraction: Double = 0.06
+    private val maximumMovementFraction: Double = 0.06,
+    private val maximumFrameGapMillis: Long = 1_500
 ) {
     init {
         require(confirmations > 0)
         require(maximumMovementFraction > 0 && maximumMovementFraction < 1)
+        require(maximumFrameGapMillis > 0)
     }
 
     private var previous: List<CountRegion>? = null
+    private var previousWidth = 0
+    private var previousHeight = 0
+    private var previousTimestamp: Long? = null
     private var streak = 0
 
-    fun update(regions: List<CountRegion>, width: Int, height: Int): Boolean {
+    fun update(regions: List<CountRegion>, width: Int, height: Int, timestampMillis: Long): Boolean {
         require(width > 0 && height > 0)
-        if (regions.isEmpty()) {
+        require(timestampMillis >= 0)
+        val lastTimestamp = previousTimestamp
+        if (lastTimestamp != null && timestampMillis <= lastTimestamp) {
             reset()
+            previousTimestamp = lastTimestamp
             return false
         }
         val old = previous
+        val recent = previousTimestamp?.let {
+            timestampMillis > it && timestampMillis - it <= maximumFrameGapMillis
+        } == true
         val consistent = old != null && old.size == regions.size &&
+            previousWidth == width && previousHeight == height && recent &&
             sameRegions(old, regions, width, height)
         streak = if (consistent) streak + 1 else 1
         previous = regions.toList()
+        previousWidth = width
+        previousHeight = height
+        previousTimestamp = timestampMillis
+        // Three empty frames are a valid zero count; keep scanning for objects.
         return streak >= confirmations
     }
 
     fun reset() {
         previous = null
+        previousTimestamp = null
+        previousWidth = 0
+        previousHeight = 0
         streak = 0
     }
 
