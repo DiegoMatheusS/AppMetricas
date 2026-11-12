@@ -11,8 +11,11 @@ internal object AngledPlanWalls {
             val length get() = hypot(bx - ax, by - ay)
         }
         val result = mutableListOf<Line>()
-        val lines = input.map { Line(it.start.x * width.toDouble(), it.start.y * height.toDouble(),
-            it.end.x * width.toDouble(), it.end.y * height.toDouble()) }
+        val lines = input.map {
+            val ax = it.start.x * width.toDouble(); val ay = it.start.y * height.toDouble()
+            val bx = it.end.x * width.toDouble(); val by = it.end.y * height.toDouble()
+            if (ax < bx || ax == bx && ay <= by) Line(ax, ay, bx, by) else Line(bx, by, ax, ay)
+        }
             .filter { it.length > 5 && listOf(it.ax, it.ay, it.bx, it.by).all(Double::isFinite) }
             .sortedByDescending { it.length }
         for (line in lines) {
