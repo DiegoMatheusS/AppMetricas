@@ -83,6 +83,7 @@ internal class ArMeasurementRenderer(
     private var notice: String? = null
     private var selectedView: PointF? = null
     private var selectedTrace = emptyList<PointF>()
+    private var selectedLocalOutline = emptyList<FloatArray>()
     private var selectionSerial = 0L
     @Volatile var selectionRadiusFraction = .015f
     @Volatile private var latest = ArMeasurementFrame()
@@ -113,6 +114,7 @@ internal class ArMeasurementRenderer(
     fun undo() {
         selectedView = null
         selectedTrace = emptyList()
+        selectedLocalOutline = emptyList()
         edit.set(null)
         automatic = false
         if (tankDimensions.isNotEmpty() && anchors.isEmpty() &&
@@ -137,6 +139,7 @@ internal class ArMeasurementRenderer(
     fun clear() {
         selectedView = null
         selectedTrace = emptyList()
+        selectedLocalOutline = emptyList()
         edit.set(null)
         anchors.forEach { anchor ->
             try { anchor.detach() } catch (_: Exception) { }
@@ -274,9 +277,11 @@ internal class ArMeasurementRenderer(
                     val boundaries = VisualBoundaryDetector.findAll(sampled.pixels,sampled.width,sampled.height)
                         .filter { it.corners.size >= 3 }
                     if (nx !in 0f..1f || ny !in 0f..1f) null else {
-                        val outlines = boundaries.map { boundary -> ObjectOutline(boundary.corners.map {
-                            NormalizedPoint(((it.x+.5f)/sampled.width).coerceIn(0f,1f),((it.y+.5f)/sampled.height).coerceIn(0f,1f))
-                        }) }
+                        fun normalized(p: br.com.medidor.app.domain.ContourPixel) = NormalizedPoint(
+                            ((p.x+.5f)/sampled.width).coerceIn(0f,1f),((p.y+.5f)/sampled.height).coerceIn(0f,1f))
+                        val outlines = boundaries.map { boundary ->
+                            ObjectOutline(boundary.corners.map(::normalized),boundary.trace.map(::normalized))
+                        }
                         val chosen = ObjectSelectionGeometry.hits(outlines,NormalizedPoint(nx,ny),sampled.width,sampled.height,
                             (selectionRadiusFraction * maxOf(sampled.width,sampled.height)).toDouble(),areaMode).firstOrNull()
                         chosen?.let { boundaries[outlines.indexOf(it)] }
@@ -376,6 +381,11 @@ internal class ArMeasurementRenderer(
                         clear()
                         throw e
                     }
+                }
+                if (selectedView != null) {
+                    val origin = anchors.first().pose.inverse()
+                    selectedLocalOutline = (if (areaMode) stable.map(::floatPoint) else positions)
+                        .map { origin.transformPoint(it) }
                 }
             } else {
                 val centerHit = hits(center).firstOrNull {
@@ -521,6 +531,9 @@ internal class ArMeasurementRenderer(
             anchors[index] = replacement
         }
         automatic = false
+        selectedView = null
+        selectedTrace = emptyList()
+        selectedLocalOutline = emptyList()
         anchorStability.reset()
         notice = "Medida ajustada. As pontas continuam fixas no ambiente."
     }
@@ -568,7 +581,10 @@ internal class ArMeasurementRenderer(
             else -> "Toque no outro extremo. O primeiro ponto acompanha a superfície."
         }
         val selection = if (selectedView == null) emptyList() else if (anchors.isEmpty()) selectedTrace
-            else worldPoints.mapNotNull(::project)
+            else (if (selectedLocalOutline.isNotEmpty()) selectedLocalOutline.map { anchors.first().pose.transformPoint(it) }
+                else worldPoints).map(::project).let { projected ->
+                    if (projected.any { it == null }) emptyList() else projected.filterNotNull()
+                }
         latest = ArMeasurementFrame(worldPoints.map(::project), sides, area,
             message, dimensionIndex, automatic, canConfirm, viewportWidth, viewportHeight, selection, selectionSerial)
         publish(latest)

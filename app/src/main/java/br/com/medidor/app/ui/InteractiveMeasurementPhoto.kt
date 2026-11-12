@@ -221,7 +221,7 @@ internal fun InteractiveMeasurementPhoto(
                                     val scene = (detail + global)
                                     val found = if (calibrated && objectMode)
                                         ObjectSelectionGeometry.hits(scene,mapped,photo.width,photo.height,
-                                            pointSize.radiusDp.dp.toPx() / (map().fit * zoom),areaMode) else emptyList()
+                                            (pointSize.radiusDp.dp.toPx() / (map().fit * zoom)).toDouble(),areaMode) else emptyList()
                                     if (found.isNotEmpty()) {
                                         matches = found; selectionIndex = 0; applySelection(found.first())
                                     } else {
@@ -243,6 +243,7 @@ internal fun InteractiveMeasurementPhoto(
                     loupe = null
                 }
             }) {
+            if (size.width <= 0 || size.height <= 0) return@Canvas
             val map = PhotoViewport(size.width,size.height,photo.width,photo.height,zoom,panX,panY)
             val native = drawContext.canvas.nativeCanvas
             native.drawBitmap(photo,null,RectF(map.left,map.top,map.left+map.width,map.top+map.height),Paint(Paint.FILTER_BITMAP_FLAG))
@@ -309,4 +310,3 @@ internal fun InteractiveMeasurementPhoto(
         }
     }
 }
-
