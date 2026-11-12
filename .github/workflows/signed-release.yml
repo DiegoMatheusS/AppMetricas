@@ -55,7 +55,9 @@ jobs:
           APPMETRICAS_KEY_PASSWORD: ${{ secrets.APPMETRICAS_KEY_PASSWORD }}
           APPMETRICAS_VERSION_CODE: ${{ github.run_number }}
           APPMETRICAS_VERSION_NAME: 0.1.${{ github.run_number }}
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
+          APPMETRICAS_PLAY_PRODUCT_ID: ${{ vars.APPMETRICAS_PLAY_PRODUCT_ID }}
+          APPMETRICAS_PLAY_LICENSE_KEY: ${{ vars.APPMETRICAS_PLAY_LICENSE_KEY }}
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
       - name: Verify release APK certificate
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
@@ -66,6 +68,12 @@ jobs:
         with:
           name: appmetricas-signed-release-${{ github.run_number }}
           path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appmetricas-signed-bundle-${{ github.run_number }}
+          path: app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 30
       - name: Remove temporary keystore

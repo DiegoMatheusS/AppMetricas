@@ -30,7 +30,7 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Importação de imagens e páginas de PDF como referência visual para traçar plantas.
 - Importação de **DXF ASCII** com entidades `LINE` e `LWPOLYLINE` de segmentos retos. Permite visualizar as camadas (layers) e escolher **uma camada** para transformá-la em paredes editáveis; também é possível usar o desenho apenas como imagem de referência.
 - Para converter linhas DXF em paredes, exige escolher explicitamente a unidade física: mm, cm, m, polegadas ou pés. Há limite de 300 paredes por importação. Polilinhas curvas com `bulge` não são suportadas.
-- Calibração da escala, reconhecimento assistido de paredes, portas e janelas em plantas retas, revisão das sugestões sobre a imagem e edição manual das marcações. Até seis pavimentos por projeto.
+- Calibração da escala, reconhecimento assistido de paredes horizontais, verticais e inclinadas com compensação de iluminação; portas e janelas nas paredes alinhadas aos eixos. Revisão das sugestões sobre a imagem e edição manual das marcações. Até seis pavimentos por projeto.
 - Zoom de precisão de até 6×, deslocamento da planta com dois dedos, correção manual de perspectiva para folhas planas e alinhamento entre andares por um ou dois pontos de referência.
 - Maquete geométrica **3D interativa**, com rotação e zoom. Exportação de geometria no formato **OBJ**, sem texturas ou propriedades BIM.
 - Até 20 projetos locais, com criação, duplicação, renomeação, seleção e exclusão confirmada.
@@ -52,17 +52,17 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Análise offline e aproximada de exposição, detalhes/contraste e possíveis fotografias muito semelhantes.
 - Comparação de pontos visuais entre fotos por descritores binários e RANSAC 2D; verificação experimental de coerência epipolar entre imagens.
 
-- Reconstrução offline por correspondências ORB, matriz essencial, recuperação de pose, triangulação e alinhamento progressivo das fotografias. A superfície parcial pode ser girada na prévia e exportada como OBJ.
+- Reconstrução offline por correspondências ORB com contraste local, matriz essencial, recuperação de pose, triangulação e alinhamento progressivo das fotografias. Refina cada ponto contra todas as câmeras que o observam e remove observações inconsistentes antes de criar a superfície. A superfície parcial pode ser girada na prévia e exportada como OBJ.
 - O campo de visão horizontal informado configura a câmera estimada. O modelo tem escala proporcional, depende da sobreposição e textura do objeto e pode conter lacunas. As dimensões físicas exigem calibração externa. Fotografias insuficientes ou inconsistentes geram uma orientação para refazer a captura.
 - O modelo salvo acompanha as fotografias que o originaram. Alterar as fotos exige reconstruí-lo. O ZIP preserva as fotos para reconstrução posterior.
 
 ### Contagem de peças
-- Mostra objetos detectados sem exigir uma seleção inicial. Tocar em uma peça filtra por aparência/cor.
+- Mostra objetos detectados sem exigir uma seleção inicial. Tocar em uma peça filtra por aparência/cor. Compensa gradientes suaves de iluminação estimando o fundo pelas bordas. Duas peças intactas de aparência e tamanho compatíveis podem fornecer a escala para separar uma região de peças encostadas da mesma cor; sem evidência suficiente, mantém a região única para revisão.
 - Após confirmar a quantidade, a posição e o tamanho das regiões em três quadros recentes, fixa a imagem e a contagem; **Nova leitura** inicia outro escaneamento. Uma cena vazia informa zero e continua buscando peças. Pausas, imagens ilegíveis e mudanças de resolução reiniciam a confirmação.
 - **Conferir foto** permite adicionar e remover marcações antes de salvar. A identificação continua aproximada e depende da imagem; não recupera peças ocultas.
 
 ### Versão Pro
-Modelo comercial previsto: versão básica gratuita e um único **Pro Completo** por **R$ 129,90**, em pagamento único. **A compra e o desbloqueio ainda não estão implementados.** Não há assinatura obrigatória prevista.
+Modelo comercial: versão básica gratuita e um único **Pro Completo**, com preço previsto de **R$ 129,90**, em pagamento único. A integração de compra, confirmação de entrega, validação de recibo assinado, restauração e controle de acesso está implementada com Google Play Billing. **A venda depende da configuração real do produto, chave pública e publicação na Play Console.** O preço mostrado vem da loja; não há assinatura. Sem configuração de venda, as ferramentas permanecem liberadas para testes, sem simular compra. Consulte [PLAY_BILLING.md](docs/PLAY_BILLING.md).
 
 ## Tecnologias e compilação
 
@@ -84,7 +84,7 @@ O GitHub Actions executa a compilação e os testes automatizados a cada atualiz
 
 - Os projetos, fotos e resultados ficam no aparelho. Não há upload obrigatório, login ou serviço pago de processamento.
 - Os arquivos ZIP de backup **não são criptografados** e devem ser armazenados em local seguro.
-- O protótipo utiliza armazenamento local simples; migração para Room e testes instrumentados de restauração estão previstos antes de uso em produção.
+- Projetos, histórico e sessões do Scanner usam documentos versionados em SQLite com migração automática das preferências anteriores. Projetos e histórico são restaurados em uma única transação; uma falha preserva os dois conjuntos anteriores. Fotografias usam gravação atômica. A migração não apaga os dados originais.
 - Testes automatizados **não substituem testes em celular real**: ainda é necessário validar câmera, importação PDF/DXF, contornos, níveis de tanque, AR, ZIP, PDF, OBJ, desempenho e consumo de memória.
 - As medições do aplicativo são estimativas e **não substituem laudos técnicos, certificações, medições fiscais ou levantamentos profissionais**.
 
@@ -93,5 +93,5 @@ O GitHub Actions executa a compilação e os testes automatizados a cada atualiz
 1. Evoluir o contorno aproximado no vídeo ao vivo para rastreamento mais estável, com calibração dinâmica ou profundidade confiável antes de mostrar medidas físicas.
 2. Melhorias na importação e identificação de paredes e aberturas de plantas, com suporte progressivo a outros formatos arquitetônicos.
 3. Validar a reconstrução do Scanner 3D com fotografias reais e melhorar a calibração e a densidade das superfícies.
-4. Reforçar persistência, restauração de backups e testes instrumentados em Android.
-5. Validar a contagem assistida de peças rotacionadas ou encostadas e implementar o desbloqueio real do Pro Completo.
+4. Validar migração e restauração com projetos reais de aparelhos usados anteriormente.
+5. Configurar o Pro Completo na Play Console e validar compras pela faixa interna da loja; conferir a contagem assistida com peças reais rotacionadas ou encostadas.

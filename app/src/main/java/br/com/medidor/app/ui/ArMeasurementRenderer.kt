@@ -249,7 +249,7 @@ internal class ArMeasurementRenderer(
         try {
             val boundary = frame.acquireCameraImage().use { image ->
                 val sampled = ArCameraImageSampler.sample(image)
-                val found = VisualBoundaryDetector.find(sampled.pixels, sampled.width, sampled.height)
+                val found = VisualBoundaryDetector.find(sampled.pixels, sampled.width, sampled.height, pendingBoundary)
                     ?: return@use null
                 val source = FloatArray(found.corners.size * 2)
                 found.corners.forEachIndexed { index, corner ->

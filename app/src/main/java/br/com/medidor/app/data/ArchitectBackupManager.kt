@@ -20,8 +20,8 @@ import java.util.zip.ZipOutputStream
  * fresh app-private filenames, avoiding collisions with existing projects.
  */
 class ArchitectBackupManager(private val context: Context) {
-    private val projects = context.getSharedPreferences("architect_plan_v1", Context.MODE_PRIVATE)
-    private val measurements = context.getSharedPreferences("measurements_v1", Context.MODE_PRIVATE)
+    private val projects = LocalDocuments(context, "architect_plan_v1")
+    private val measurements = LocalDocuments(context, "measurements_v1")
     private val imageFolder = File(context.filesDir, "architect").apply { mkdirs() }
 
     fun export(target: OutputStream): Int {
@@ -99,11 +99,6 @@ class ArchitectBackupManager(private val context: Context) {
             check(mkdirs()) { "Não foi possível preparar a restauração." }
         }
         val installed = mutableListOf<File>()
-        val previousProjects = projects.all.mapNotNull { (key, value) ->
-            (value as? String)?.let { key to it }
-        }.toMap()
-        val previousMeasurements = measurements.getString("records", null)
-        var changedPreferences = false
         try {
             val collected = BackupZipReader.extract(source, staging)
             val manifestFile = requireNotNull(collected["manifest.json"]) {
@@ -191,8 +186,11 @@ class ArchitectBackupManager(private val context: Context) {
             for ((oldName, newName) in newImages) {
                 val destination = File(imageFolder, newName)
                 check(!destination.exists()) { "Nome de arquivo duplicado." }
-                collected.getValue("images/$oldName").copyTo(destination)
                 installed += destination
+                java.io.FileOutputStream(destination).use { output ->
+                    collected.getValue("images/$oldName").inputStream().use { it.copyTo(output) }
+                    output.fd.sync()
+                }
             }
             // Re-map floor image references before writing any project preferences.
             val newIds = plans.associate { it.first to UUID.randomUUID().toString() }
@@ -218,22 +216,12 @@ class ArchitectBackupManager(private val context: Context) {
             }
             editor.putString("project_index_v1", index.toString())
                 .putString("active_project_v1", targetId)
-            check(editor.commit()) { "Falha ao salvar projetos restaurados." }
-            changedPreferences = true
-            check(measurements.edit().putString("records", savedMeasurements.toString()).commit()) {
-                "Falha ao salvar histórico restaurado."
+            check(projects.commitTogether(editor,
+                measurements.edit().putString("records", savedMeasurements.toString()))) {
+                "Falha ao restaurar os dados. Os projetos e o histórico anteriores foram preservados."
             }
             return normalizedProjects.size
         } catch (error: Exception) {
-            if (changedPreferences) {
-                val rollback = projects.edit().clear()
-                previousProjects.forEach { (k, v) -> rollback.putString(k, v) }
-                rollback.commit()
-                val historyRollback = measurements.edit()
-                if (previousMeasurements == null) historyRollback.remove("records")
-                else historyRollback.putString("records", previousMeasurements)
-                historyRollback.commit()
-            }
             installed.forEach { it.delete() }
             throw error
         } finally {

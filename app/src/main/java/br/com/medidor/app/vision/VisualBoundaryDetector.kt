@@ -3,6 +3,7 @@ package br.com.medidor.app.vision
 import br.com.medidor.app.domain.AdaptiveEdgeThresholds
 import br.com.medidor.app.domain.ContourPixel
 import br.com.medidor.app.domain.PlanarContourResult
+import br.com.medidor.app.domain.LiveContourTracking
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
@@ -19,7 +20,7 @@ internal object VisualBoundaryDetector {
      * illumination; this remains a 2D outline candidate, not object recognition.
      * Reject uniform frames rather than inventing a perimeter.
      */
-    fun find(pixels: IntArray, width: Int, height: Int): VisualBoundary? {
+    fun find(pixels: IntArray, width: Int, height: Int, previous: PlanarContourResult? = null): VisualBoundary? {
         require(width in 8..512 && height in 8..512 && pixels.size == width * height)
         val adaptive = AdaptiveEdgeThresholds.fromArgb(pixels) ?: return null
         NativeVision.requireAvailable()
@@ -31,6 +32,9 @@ internal object VisualBoundaryDetector {
                     114 * (color and 255)) / 1000).toByte()
             })
             val blurred = scope.own(Mat())
+            val equalized = scope.own(Mat())
+            val contrast = Imgproc.createCLAHE(2.0, Size(8.0, 8.0))
+            try { contrast.apply(gray, equalized) } finally { contrast.collectGarbage(); contrast.clear() }
             val edges = scope.own(Mat())
             Imgproc.GaussianBlur(gray, blurred, Size(5.0, 5.0), 0.0)
             val kernel = scope.own(Imgproc.getStructuringElement(
@@ -42,8 +46,9 @@ internal object VisualBoundaryDetector {
                 35.0 to 105.0,
                 20.0 to 60.0
             ).distinct()
-            for ((low, high) in passes) {
-                Imgproc.Canny(blurred, edges, low, high)
+            for ((pass, thresholds) in (passes + (25.0 to 75.0)).withIndex()) {
+                val (low, high) = thresholds
+                Imgproc.Canny(if (pass == passes.size) equalized else blurred, edges, low, high)
                 Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel)
                 val contours = mutableListOf<MatOfPoint>()
                 val hierarchy = scope.own(Mat())
@@ -71,13 +76,15 @@ internal object VisualBoundaryDetector {
                         val centerDistance =
                             abs((box.x + box.width / 2.0) / width - .5) +
                             abs((box.y + box.height / 2.0) / height - .5)
-                        val score = area * (1 - centerDistance.coerceAtMost(.9) * .55) *
-                            (.5 + .5 * fill)
                         val region = PlanarContourResult(
                             width, height, box.x, box.y,
                             box.x + box.width - 1, box.y + box.height - 1,
                             area.toInt(), corners
                         )
+                        val continuity = if (previous == null) 1.0 else
+                            .6 + 1.4 * LiveContourTracking.overlap(previous, region)
+                        val score = area * (1 - centerDistance.coerceAtMost(.9) * .55) *
+                            (.5 + .5 * fill) * continuity
                         if (best == null || score > best!!.second) {
                             best = VisualBoundary(corners, region) to score
                         }
