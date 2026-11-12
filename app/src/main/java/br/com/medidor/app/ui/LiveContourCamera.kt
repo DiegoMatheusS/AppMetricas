@@ -10,6 +10,10 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.Camera
+import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.ZoomState
+import androidx.lifecycle.Observer
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -101,11 +105,13 @@ internal fun LiveContourCamera(
     onBack: () -> Unit = {},
     onManual: () -> Unit = {},
     onAr: () -> Unit,
-    onSwitchTool: (LiveMeasureTool) -> Unit = {}
+    onSwitchTool: (LiveMeasureTool) -> Unit = {},
+    onSelectionSeed: (NormalizedPoint?) -> Unit = {}
 ) {
     val context = LocalContext.current
     val owner = context as? ComponentActivity
     val latestPhoto by rememberUpdatedState(onPhoto)
+    val latestSeed by rememberUpdatedState(onSelectionSeed)
     val latestError by rememberUpdatedState(onError)
     val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
     val worker = remember { Executors.newSingleThreadExecutor() }
@@ -119,12 +125,26 @@ internal fun LiveContourCamera(
     var overlay by remember { mutableStateOf<ContourOverlay?>(null) }
     val latestOverlay by rememberUpdatedState(overlay)
     var capture by remember { mutableStateOf<ImageCapture?>(null) }
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
+    var zoomRatio by remember { mutableStateOf(1f) }
+    var minimumZoom by remember { mutableStateOf(1f) }
+    var maximumZoom by remember { mutableStateOf(1f) }
     var tolerance by remember { mutableStateOf(32) }
     val previewView = remember(context) {
         PreviewView(context).apply { scaleType=PreviewView.ScaleType.FILL_CENTER }
     }
 
     val selection = remember { AtomicReference(ContourSelection(ready = false)) }
+    DisposableEffect(boundCamera, owner) {
+        val info = boundCamera?.cameraInfo
+        val observer = Observer<ZoomState> { state ->
+            zoomRatio = state.zoomRatio
+            minimumZoom = state.minZoomRatio
+            maximumZoom = minOf(8f,state.maxZoomRatio)
+        }
+        if (owner != null) info?.zoomState?.observe(owner,observer)
+        onDispose { info?.zoomState?.removeObserver(observer) }
+    }
     fun restartSearch(message: String) {
         selection.set(ContourSelection(autoSearch, tapMarker, drawnArea, tolerance,
             ready = showContours && (!areaMode || drawnArea != null)))
@@ -149,7 +169,7 @@ internal fun LiveContourCamera(
                     setSurfaceProvider(previewView.surfaceProvider)
                 }
                 val imageCapture = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .build()
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -210,13 +230,13 @@ internal fun LiveContourCamera(
                     .build()
                 provider.unbindAll()
                 try {
-                    provider.bindToLifecycle(owner,CameraSelector.DEFAULT_BACK_CAMERA,group)
+                    boundCamera = provider.bindToLifecycle(owner,CameraSelector.DEFAULT_BACK_CAMERA,group)
                 } catch (_: Exception) {
                     provider.unbindAll()
                     analysis.clearAnalyzer()
                     val photoGroup = UseCaseGroup.Builder().addUseCase(preview)
                         .addUseCase(imageCapture).setViewPort(viewPort).build()
-                    provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, photoGroup)
+                    boundCamera = provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, photoGroup)
                     latestError("Use Marcar pontos para medir. A análise ao vivo não está disponível neste aparelho.")
                 }
                 boundProvider = provider
@@ -250,12 +270,13 @@ internal fun LiveContourCamera(
             boundProvider?.unbindAll()
             worker.shutdown()
             capture = null
+            boundCamera = null
             overlay = null
         }
     }
 
     var capturing by remember { mutableStateOf(false) }
-    fun captureMeasurement() {
+    fun captureMeasurement(seed: NormalizedPoint? = null) {
         val camera = capture ?: return
         if (capturing) return
         capturing = true
@@ -268,6 +289,7 @@ internal fun LiveContourCamera(
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     try {
+                        latestSeed(seed)
                         latestPhoto(SampledPhotos.fromFile(file))
                     } catch (e: Exception) {
                         latestError(e.localizedMessage ?: "Falha ao abrir imagem capturada.")
@@ -361,16 +383,37 @@ internal fun LiveContourCamera(
                     colors = ButtonDefaults.buttonColors(containerColor = lime, contentColor = ink)
                 ) { Text(if (tool == LiveMeasureTool.TANK) "Medir tanque" else "Marcar pontos na foto") }
                 OutlinedButton(onClick = { if (tool == LiveMeasureTool.TANK) onManual() else onAr() },
+                    enabled = !capturing,
                     modifier = Modifier.weight(1f)) {
                     Text(if (tool == LiveMeasureTool.TANK) "Dimensões manuais" else "Medir no ambiente", color = lime)
                 }
+            }
+            if (tool != LiveMeasureTool.TANK) Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.weight(1f)) {
+                    listOf(1f,2f,4f,8f).forEach { level ->
+                        TextButton(enabled = boundCamera != null && !capturing && level in minimumZoom..maximumZoom,
+                            modifier = Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
+                            onClick = {
+                                val future = boundCamera?.cameraControl?.setZoomRatio(level)
+                                future?.addListener({ runCatching { future.get() }.onFailure { latestError("Não foi possível aplicar este zoom.") } },mainExecutor)
+                            }) { Text(level.toInt().toString()+"×",color = if (kotlin.math.abs(zoomRatio-level)<.05f) lime else Color.White) }
+                    }
+                }
+                TextButton(enabled = capture != null && !capturing,onClick = { captureMeasurement() }) { Text("Medir de longe",color = lime) }
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
             Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
                 detectTapGestures { touch ->
-                    if (!showContours) return@detectTapGestures
+                    if (!showContours) {
+                        if (tool != LiveMeasureTool.TANK && size.width > 0 && size.height > 0) {
+                            runCatching { boundCamera?.cameraControl?.startFocusAndMetering(
+                                FocusMeteringAction.Builder(previewView.meteringPointFactory.createPoint(touch.x,touch.y)).build()) }
+                            captureMeasurement(NormalizedPoint((touch.x/size.width).coerceIn(0f,1f),(touch.y/size.height).coerceIn(0f,1f)))
+                        }
+                        return@detectTapGestures
+                    }
                     val currentFrame = latestOverlay?.takeIf { it.width > 1 && it.height > 1 }
                     val normalized = currentFrame?.let {
                         CameraPreviewGeometry(
@@ -470,7 +513,7 @@ internal fun LiveContourCamera(
                 capturing -> "Capturando a foto…"
                 capture == null -> "Preparando câmera. Você também pode abrir uma fotografia."
                 tool == LiveMeasureTool.TANK -> "Meça as dimensões em AR ou informe os valores conhecidos."
-                else -> "Toque em Marcar pontos. A foto ficará fixa para medir com uma referência conhecida."
+                else -> "Toque no objeto para selecionar e medir. Para uma cerca distante, use o zoom e uma referência conhecida."
             }, color = Color.White, fontSize = 13.sp)
             if (tool != LiveMeasureTool.TANK) TextButton(onClick = onGallery) { Text("Abrir fotografia", color = lime) }
         }

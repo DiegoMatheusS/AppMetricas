@@ -23,6 +23,45 @@ import kotlin.math.min
 class PointMeasurementUiTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun tappingAnotherObjectRecalculatesOnlyItsOwnEdges() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        val saved = CopyOnWriteArrayList<String>()
+        val photo = Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(photo).apply {
+            drawColor(android.graphics.Color.WHITE)
+            val paint = android.graphics.Paint().apply { color = android.graphics.Color.rgb(30,60,90) }
+            drawRect(80f,300f,240f,420f,paint)
+            drawRect(400f,240f,720f,480f,paint)
+        }
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent { MedidorTheme { PointPhotoMeasurementScreen(photo,false,{}, { _, value -> saved.add(value) }) } }
+            }
+            waitFor("Área de marcação da foto")
+            val deadline = SystemClock.elapsedRealtime()+10_000
+            while (node("Escaneando arestas…") != null && SystemClock.elapsedRealtime()<deadline) Thread.sleep(100)
+            assertNull("Escaneamento concluído",node("Escaneando arestas…"))
+            tapPhoto(.1f,.15f); tapPhoto(.5f,.15f)
+            click("Aplicar escala")
+            tapPhoto(.2f,.6f)
+            waitFor("Objeto selecionado")
+            click("Salvar")
+            tapPhoto(.7f,.6f)
+            click("Salvar")
+            assertEquals(2,saved.size)
+            fun centimeters(value: String) = Regex("Distância: ([0-9,]+) cm").find(value)!!.groupValues[1].replace(',','.').toDouble()
+            assertEquals(5.0,centimeters(saved[0]),.2)
+            assertEquals(10.0,centimeters(saved[1]),.2)
+            click("Ponto")
+            waitFor("Tamanho do ponto")
+            click("Fino")
+            assertTrue(saved[1].startsWith("Distância:"))
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     @Test fun photoTapsCalibrateCalculateAndSaveDistanceAndArea() {
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity

@@ -15,6 +15,44 @@ import kotlin.random.Random
 
 @RunWith(AndroidJUnit4::class)
 class NativeVisionTest {
+    @Test fun multiplePhotoObjectsAndZoomedCropsKeepOriginalCoordinates() {
+        val photo = Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888)
+        Canvas(photo).apply {
+            drawColor(Color.WHITE)
+            val paint = Paint().apply { color = Color.rgb(30,60,90) }
+            drawRect(80f,280f,240f,420f,paint)
+            drawRect(400f,240f,720f,480f,paint)
+        }
+        try {
+            val outlines = PhotoObjectScanner.scan(photo)
+            val left = ObjectSelectionGeometry.hits(outlines,NormalizedPoint(.2f,.55f),800,600,3.0,true).first()
+            val right = ObjectSelectionGeometry.hits(outlines,NormalizedPoint(.7f,.55f),800,600,3.0,true).first()
+            assertTrue(left.corners.maxOf { it.x } < .32f)
+            assertTrue(right.corners.minOf { it.x } > .48f)
+            val cropped = PhotoObjectScanner.scan(photo,.4f,.2f,.98f,.98f)
+            val detail = ObjectSelectionGeometry.hits(cropped,NormalizedPoint(.7f,.55f),800,600,3.0,true).first()
+            assertEquals(right.corners.minOf { it.x },detail.corners.minOf { it.x },.01f)
+            assertEquals(right.corners.maxOf { it.y },detail.corners.maxOf { it.y },.01f)
+            assertTrue(ObjectSelectionGeometry.areaPixels(right,800,600)!! > ObjectSelectionGeometry.areaPixels(left,800,600)!! * 2)
+            assertFalse(photo.isRecycled)
+        } finally { photo.recycle() }
+    }
+
+    @Test fun selectionEffectDimsOnlyTheAreaOutsideTheContour() {
+        val bitmap = Bitmap.createBitmap(200,160,Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        br.com.medidor.app.ui.ObjectSelectionEffect.draw(canvas,listOf(
+            android.graphics.PointF(40f,30f),android.graphics.PointF(160f,30f),
+            android.graphics.PointF(160f,130f),android.graphics.PointF(40f,130f)),
+            android.graphics.RectF(0f,0f,200f,160f),1f,1f)
+        try {
+            assertEquals(Color.WHITE,bitmap.getPixel(100,80))
+            assertTrue(Color.red(bitmap.getPixel(10,10)) in 160..190)
+            assertTrue(Color.green(bitmap.getPixel(40,80)) > Color.red(bitmap.getPixel(40,80)))
+        } finally { bitmap.recycle() }
+    }
+
     @Test fun boundaryDetectionRunsWithThePackagedNativeLibrary() {
         val bitmap = Bitmap.createBitmap(200, 160, Bitmap.Config.ARGB_8888)
         Canvas(bitmap).apply {
