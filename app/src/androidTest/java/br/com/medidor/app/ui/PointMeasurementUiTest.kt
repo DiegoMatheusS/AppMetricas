@@ -56,7 +56,12 @@ class PointMeasurementUiTest {
             click("Ponto")
             waitFor("Tamanho do ponto")
             click("Fino")
-            assertTrue(saved[1].startsWith("Distância:"))
+            click("Pontos")
+            assertFalse(clickable("Salvar")!!.isEnabled)
+            tapPhoto(.1f,.9f); tapPhoto(.5f,.9f)
+            waitFor("Distância: 10 cm")
+            click("Salvar")
+            assertEquals(3,saved.size)
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
         }

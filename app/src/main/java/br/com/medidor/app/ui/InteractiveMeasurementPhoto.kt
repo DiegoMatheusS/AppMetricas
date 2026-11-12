@@ -138,7 +138,13 @@ internal fun InteractiveMeasurementPhoto(
     Column(modifier) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             FilterChip(selected = objectMode,onClick = { objectMode = true },label = { Text("Objeto") })
-            FilterChip(selected = !objectMode,onClick = { objectMode = false },label = { Text("Pontos") })
+            FilterChip(selected = !objectMode,onClick = {
+                if (objectMode) {
+                    points.clear(); selected = null; matches = emptyList()
+                    onAutomaticArea(null); onChanged(); onNotice(null)
+                }
+                objectMode = false
+            },label = { Text("Pontos") })
             TextButton(onClick = onPointOptions) { Text("Ponto") }
             TextButton(onClick = { showEdges = !showEdges }) { Text(if (showEdges) "Ocultar arestas" else "Arestas") }
         }
