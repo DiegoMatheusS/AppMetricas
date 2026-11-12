@@ -1,6 +1,7 @@
 package br.com.medidor.app.ui
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -8,9 +9,12 @@ import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PointF
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.opengl.GLSurfaceView
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
@@ -29,6 +33,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
 import br.com.medidor.app.data.LocalHistory
+import br.com.medidor.app.data.MeasurementPreferences
+import br.com.medidor.app.domain.MeasurementPointSize
 import br.com.medidor.app.domain.TankShape
 import br.com.medidor.app.domain.CameraViewportMapping
 import com.google.ar.core.ArCoreApk
@@ -70,6 +76,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
     private var areaMode = false
     private var tankShape: TankShape? = null
     private var dimensions = emptyList<String>()
+    private lateinit var pointPreferences: MeasurementPreferences
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) startSession()
@@ -88,9 +95,10 @@ internal class ArMeasurementActivity : ComponentActivity() {
             null -> emptyList()
         }
         areaMode = tankShape == null && intent.getBooleanExtra(EXTRA_AREA, false)
+        pointPreferences = MeasurementPreferences(applicationContext)
         overlay = ArMeasurementOverlay(this, ::updateControls, onMove = { index,x,y ->
             if (running && !saved) cameraTouch(x,y)?.let { renderer.requestMove(index,it.first,it.second) }
-        }) { x, y ->
+        }, onPointOptions = ::choosePointSize) { x, y ->
             if (running && !saved) {
                 cameraTouch(x,y)?.let {
                     renderer.requestPoint(it.first,it.second)
@@ -107,6 +115,8 @@ internal class ArMeasurementActivity : ComponentActivity() {
             setRenderer(this@ArMeasurementActivity.renderer)
         }
         overlay.cameraView = surface
+        overlay.pointSize = pointPreferences.pointSize
+        surface.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePointRadius() }
 
         val root = FrameLayout(this)
         root.addView(surface, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -140,6 +150,11 @@ internal class ArMeasurementActivity : ComponentActivity() {
                 addView(automatic, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                 addView(manual, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             })
+            addView(Button(context).apply {
+                text = "Tamanho do ponto"
+                isAllCaps = false
+                setOnClickListener { choosePointSize() }
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
         root.addView(header, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
 
@@ -355,6 +370,23 @@ internal class ArMeasurementActivity : ComponentActivity() {
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
+    private fun choosePointSize() {
+        val choices = MeasurementPointSize.entries
+        AlertDialog.Builder(this).setTitle("Tamanho do ponto")
+            .setSingleChoiceItems(choices.map { it.label }.toTypedArray(), choices.indexOf(overlay.pointSize)) { dialog, index ->
+                overlay.pointSize = choices[index]
+                runCatching { pointPreferences.pointSize = choices[index] }
+                updatePointRadius()
+                overlay.invalidate()
+                dialog.dismiss()
+            }.setNegativeButton("Fechar", null).show()
+    }
+
+    private fun updatePointRadius() {
+        renderer.selectionRadiusFraction = overlay.pointSize.radiusDp * resources.displayMetrics.density /
+            maxOf(surface.width, surface.height, 1)
+    }
+
     private fun cameraTouch(x: Float,y: Float): Pair<Float,Float>? {
         val from = IntArray(2).also(overlay::getLocationInWindow)
         val to = IntArray(2).also(surface::getLocationInWindow)
@@ -367,7 +399,8 @@ private val arNumber = NumberFormat.getNumberInstance(Locale("pt", "BR")).apply 
     maximumFractionDigits = 2
 }
 
-private fun formatArLength(meters: Double) = "${arNumber.format(meters * 100)} cm"
+private fun formatArLength(meters: Double) = if (meters >= 1) "${arNumber.format(meters)} m"
+    else "${arNumber.format(meters * 100)} cm"
 
 private fun formatArArea(squareMeters: Double) =
     if (squareMeters < .01) "${arNumber.format(squareMeters * 10_000)} cm²"
@@ -377,12 +410,16 @@ private class ArMeasurementOverlay(
     context: Context,
     private val updateControls: (ArMeasurementFrame) -> Unit,
     private val onMove: (Int, Float, Float) -> Unit,
+    private val onPointOptions: () -> Unit,
     onPoint: (Float, Float) -> Unit
 ) : View(context) {
     var cameraView: View? = null
+    var pointSize = MeasurementPointSize.NORMAL
     @Volatile private var frame = ArMeasurementFrame()
     private var displayedPoints = emptyList<android.graphics.PointF?>()
     private var dragged: Int? = null
+    private var animatedSerial = -1L
+    private var animationStart = 0L
     private val lime = Color.rgb(192, 245, 101)
     private val density = resources.displayMetrics.density
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = lime; strokeWidth = 3 * density }
@@ -397,7 +434,7 @@ private class ArMeasurementOverlay(
             dragged = displayedPoints.indices.filter { displayedPoints[it] != null }.minByOrNull {
                 val p = displayedPoints[it]!!
                 kotlin.math.hypot(p.x-e.x,p.y-e.y)
-            }?.takeIf { val p = displayedPoints[it]!!; kotlin.math.hypot(p.x-e.x,p.y-e.y) <= 30*density }
+            }?.takeIf { val p = displayedPoints[it]!!; kotlin.math.hypot(p.x-e.x,p.y-e.y) <= pointSize.hitRadiusDp*density }
             return true
         }
         override fun onScroll(e1: MotionEvent?,e2: MotionEvent,distanceX: Float,distanceY: Float): Boolean {
@@ -407,7 +444,7 @@ private class ArMeasurementOverlay(
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             performClick()
-            if (dragged == null) onPoint(e.x, e.y)
+            if (dragged == null) onPoint(e.x, e.y) else onPointOptions()
             return true
         }
     })
@@ -431,12 +468,24 @@ private class ArMeasurementOverlay(
         val camera = cameraView ?: return
         val cameraOrigin = IntArray(2).also(camera::getLocationInWindow)
         val overlayOrigin = IntArray(2).also(::getLocationInWindow)
-        val points = current.points.map { point -> point?.let {
+        fun map(point: PointF): PointF? = point.let {
             CameraViewportMapping.overlayPoint(it.x/current.viewportWidth,it.y/current.viewportHeight,
                 overlayOrigin[0],overlayOrigin[1],cameraOrigin[0],cameraOrigin[1],camera.width,camera.height)
-                ?.let { mapped -> android.graphics.PointF(mapped.first,mapped.second) }
-        } }
+                ?.let { mapped -> PointF(mapped.first,mapped.second) }
+        }
+        val points = current.points.map { it?.let(::map) }
         displayedPoints = points
+        if (current.selectionSerial != animatedSerial) {
+            animatedSerial = current.selectionSerial
+            animationStart = 0L
+        }
+        val selection = current.selectionOutline.mapNotNull(::map)
+        if (selection.size >= 2) {
+            if (animationStart == 0L) animationStart = SystemClock.uptimeMillis()
+            val progress = ((SystemClock.uptimeMillis()-animationStart)/950f).coerceIn(0f,1f)
+            ObjectSelectionEffect.draw(canvas,selection,RectF(0f,0f,width.toFloat(),height.toFloat()),progress,density)
+            if (progress < 1) postInvalidateOnAnimation()
+        }
         current.sides.forEachIndexed { index, meters ->
             val start = points[index] ?: return@forEachIndexed
             val end = points[(index + 1) % points.size] ?: return@forEachIndexed
@@ -467,8 +516,9 @@ private class ArMeasurementOverlay(
             }
         }
         for (point in points.filterNotNull()) {
-            canvas.drawCircle(point.x, point.y, 7 * density, backing)
-            canvas.drawCircle(point.x, point.y, 5 * density, line)
+            val radius = pointSize.radiusDp * density
+            canvas.drawCircle(point.x, point.y, radius + 2*density, backing)
+            canvas.drawCircle(point.x, point.y, radius, line)
         }
     }
 }

@@ -13,6 +13,9 @@ import br.com.medidor.app.domain.LiveContourTracking
 import br.com.medidor.app.domain.PlanarContourResult
 import br.com.medidor.app.domain.Point3d
 import br.com.medidor.app.domain.PointMeasurementGeometry
+import br.com.medidor.app.domain.ObjectOutline
+import br.com.medidor.app.domain.ObjectSelectionGeometry
+import br.com.medidor.app.domain.NormalizedPoint
 import br.com.medidor.app.vision.VisualBoundaryDetector
 import com.google.ar.core.Coordinates2d
 import com.google.ar.core.HitResult
@@ -40,7 +43,9 @@ internal data class ArMeasurementFrame(
     val automatic: Boolean = true,
     val canConfirm: Boolean = false,
     val viewportWidth: Int = 1,
-    val viewportHeight: Int = 1
+    val viewportHeight: Int = 1,
+    val selectionOutline: List<PointF> = emptyList(),
+    val selectionSerial: Long = 0
 )
 
 internal class ArMeasurementRenderer(
@@ -76,6 +81,11 @@ internal class ArMeasurementRenderer(
     private var viewportWidth = 1
     private var viewportHeight = 1
     private var notice: String? = null
+    private var selectedView: PointF? = null
+    private var selectedTrace = emptyList<PointF>()
+    private var selectedLocalOutline = emptyList<FloatArray>()
+    private var selectionSerial = 0L
+    @Volatile var selectionRadiusFraction = .015f
     @Volatile private var latest = ArMeasurementFrame()
     private var automatic = true
     private var lastAnalysis = 0L
@@ -102,6 +112,9 @@ internal class ArMeasurementRenderer(
     }
 
     fun undo() {
+        selectedView = null
+        selectedTrace = emptyList()
+        selectedLocalOutline = emptyList()
         edit.set(null)
         automatic = false
         if (tankDimensions.isNotEmpty() && anchors.isEmpty() &&
@@ -124,6 +137,9 @@ internal class ArMeasurementRenderer(
     }
 
     fun clear() {
+        selectedView = null
+        selectedTrace = emptyList()
+        selectedLocalOutline = emptyList()
         edit.set(null)
         anchors.forEach { anchor ->
             try { anchor.detach() } catch (_: Exception) { }
@@ -227,9 +243,11 @@ internal class ArMeasurementRenderer(
             } else if (touch != null) {
                 if (automatic) {
                     clear()
-                    automatic = false
-                }
-                placePoint(frame, touch)
+                    selectedView = PointF(touch.x/viewportWidth,touch.y/viewportHeight)
+                    selectionSerial++
+                    lastAnalysis = 0L; lastAnalysisTimestamp = 0L
+                    detectAutomatically(frame)
+                } else placePoint(frame, touch)
             } else if (automatic && anchors.isEmpty()) {
                 detectAutomatically(frame)
             }
@@ -249,8 +267,36 @@ internal class ArMeasurementRenderer(
         try {
             val boundary = frame.acquireCameraImage().use { image ->
                 val sampled = ArCameraImageSampler.sample(image)
-                val found = VisualBoundaryDetector.find(sampled.pixels, sampled.width, sampled.height, pendingBoundary)
-                    ?: return@use null
+                val target = selectedView
+                val found = if (target == null) VisualBoundaryDetector.find(sampled.pixels, sampled.width, sampled.height, pendingBoundary)
+                else {
+                    val raw = FloatArray(2)
+                    frame.transformCoordinates2d(Coordinates2d.VIEW,
+                        floatArrayOf(target.x*viewportWidth,target.y*viewportHeight),Coordinates2d.IMAGE_PIXELS,raw)
+                    val nx = raw[0]/image.width; val ny = raw[1]/image.height
+                    val boundaries = VisualBoundaryDetector.findAll(sampled.pixels,sampled.width,sampled.height)
+                        .filter { it.corners.size >= 3 }
+                    if (nx !in 0f..1f || ny !in 0f..1f) null else {
+                        fun normalized(p: br.com.medidor.app.domain.ContourPixel) = NormalizedPoint(
+                            ((p.x+.5f)/sampled.width).coerceIn(0f,1f),((p.y+.5f)/sampled.height).coerceIn(0f,1f))
+                        val outlines = boundaries.map { boundary ->
+                            ObjectOutline(boundary.corners.map(::normalized),boundary.trace.map(::normalized))
+                        }
+                        val chosen = ObjectSelectionGeometry.hits(outlines,NormalizedPoint(nx,ny),sampled.width,sampled.height,
+                            (selectionRadiusFraction * maxOf(sampled.width,sampled.height)).toDouble(),areaMode).firstOrNull()
+                        chosen?.let { boundaries[outlines.indexOf(it)] }
+                    }
+                } ?: return@use null
+                if (target != null) {
+                    val input = FloatArray(found.trace.size*2)
+                    found.trace.forEachIndexed { index,p ->
+                        input[index*2] = (p.x+.5f)*image.width/sampled.width
+                        input[index*2+1] = (p.y+.5f)*image.height/sampled.height
+                    }
+                    val output = FloatArray(input.size)
+                    frame.transformCoordinates2d(Coordinates2d.IMAGE_PIXELS,input,Coordinates2d.VIEW,output)
+                    selectedTrace = List(found.trace.size) { PointF(output[it*2],output[it*2+1]) }
+                }
                 val source = FloatArray(found.corners.size * 2)
                 found.corners.forEachIndexed { index, corner ->
                     source[index * 2] = (corner.x + .5f) * image.width / sampled.width
@@ -261,6 +307,7 @@ internal class ArMeasurementRenderer(
                 found to List(found.corners.size) { PointF(screen[it * 2], screen[it * 2 + 1]) }
             }
             if (boundary == null) {
+                selectedTrace = emptyList()
                 resetStability()
                 notice = "Enquadre um objeto inteiro, com bordas visíveis e fundo contrastante."
                 return
@@ -334,6 +381,11 @@ internal class ArMeasurementRenderer(
                         clear()
                         throw e
                     }
+                }
+                if (selectedView != null) {
+                    val origin = anchors.first().pose.inverse()
+                    selectedLocalOutline = (if (areaMode) stable.map(::floatPoint) else positions)
+                        .map { origin.transformPoint(it) }
                 }
             } else {
                 val centerHit = hits(center).firstOrNull {
@@ -479,6 +531,9 @@ internal class ArMeasurementRenderer(
             anchors[index] = replacement
         }
         automatic = false
+        selectedView = null
+        selectedTrace = emptyList()
+        selectedLocalOutline = emptyList()
         anchorStability.reset()
         notice = "Medida ajustada. As pontas continuam fixas no ambiente."
     }
@@ -525,8 +580,13 @@ internal class ArMeasurementRenderer(
             worldPoints.isEmpty() -> "Mova o celular devagar e toque no início da medida."
             else -> "Toque no outro extremo. O primeiro ponto acompanha a superfície."
         }
+        val selection = if (selectedView == null) emptyList() else if (anchors.isEmpty()) selectedTrace
+            else (if (selectedLocalOutline.isNotEmpty()) selectedLocalOutline.map { anchors.first().pose.transformPoint(it) }
+                else worldPoints).map(::project).let { projected ->
+                    if (projected.any { it == null }) emptyList() else projected.filterNotNull()
+                }
         latest = ArMeasurementFrame(worldPoints.map(::project), sides, area,
-            message, dimensionIndex, automatic, canConfirm, viewportWidth, viewportHeight)
+            message, dimensionIndex, automatic, canConfirm, viewportWidth, viewportHeight, selection, selectionSerial)
         publish(latest)
     }
 

@@ -181,6 +181,7 @@ fun CameraMeasurementScreen(
         granted = it
     }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var objectSeed by remember { mutableStateOf<NormalizedPoint?>(null) }
     var pointEditor by remember { mutableStateOf(false) }
     var cameraMode by remember { mutableStateOf("live") }
     var coin by remember { mutableStateOf(BrazilianCoin.TWENTY_FIVE_CENTS) }
@@ -198,6 +199,7 @@ fun CameraMeasurementScreen(
         if (uri != null) {
             try {
                 bitmap = SampledPhotos.fromUri(context.contentResolver, uri)
+                objectSeed = null
                 pointEditor = true
                 points.clear()
                 seed = null
@@ -211,13 +213,14 @@ fun CameraMeasurementScreen(
     if (bitmap != null && pointEditor) {
         BackHandler { bitmap = null; pointEditor = false }
         PointPhotoMeasurementScreen(bitmap!!, liveTool == LiveMeasureTool.AREA,
-            onBack = { bitmap = null; pointEditor = false }, onSave = onSave)
+            onBack = { bitmap = null; pointEditor = false }, onSave = onSave, initialObjectSeed = objectSeed)
         return
     }
     // The live analysis owns the entire portrait viewport. Photo calibration remains available
     // after capturing an analyzed frame; live sizes are only fractions of the image.
     if (bitmap == null && granted) {
         LiveContourCamera(
+            onSelectionSeed = { objectSeed = it },
             onPhoto = {
                 bitmap = it
                 pointEditor = true
