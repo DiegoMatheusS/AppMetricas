@@ -52,7 +52,7 @@ Aplicativo Android nativo em **Kotlin e Jetpack Compose**, para medições estim
 - Análise offline e aproximada de exposição, detalhes/contraste e possíveis fotografias muito semelhantes.
 - Comparação de pontos visuais entre fotos por descritores binários e RANSAC 2D; verificação experimental de coerência epipolar entre imagens.
 
-- Reconstrução offline por correspondências ORB com contraste local, matriz essencial, recuperação de pose, triangulação e alinhamento progressivo das fotografias. Refina cada ponto contra todas as câmeras que o observam e remove observações inconsistentes antes de criar a superfície. A superfície parcial pode ser girada na prévia e exportada como OBJ.
+- Reconstrução offline por correspondências ORB, com uma segunda tentativa usando realce de contraste quando a extração original é insuficiente, matriz essencial, recuperação de pose, triangulação e alinhamento progressivo das fotografias. Refina cada ponto contra todas as câmeras que o observam e remove observações inconsistentes antes de criar a superfície. A superfície parcial pode ser girada na prévia e exportada como OBJ.
 - O campo de visão horizontal informado configura a câmera estimada. O modelo tem escala proporcional, depende da sobreposição e textura do objeto e pode conter lacunas. As dimensões físicas exigem calibração externa. Fotografias insuficientes ou inconsistentes geram uma orientação para refazer a captura.
 - O modelo salvo acompanha as fotografias que o originaram. Alterar as fotos exige reconstruí-lo. O ZIP preserva as fotos para reconstrução posterior.
 
