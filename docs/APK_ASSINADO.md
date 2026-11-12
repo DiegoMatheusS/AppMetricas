@@ -1,6 +1,6 @@
 # APK assinado e atualização sem desinstalar
 
-O workflow `Signed release APK` gera um APK release assinado quando executado manualmente na aba **Actions** da branch principal.
+O workflow `Signed release APK` gera um APK release assinado automaticamente após o **Android CI** aprovar uma atualização da `main`, incluindo os testes de unidade e do emulador. O APK usa exatamente o commit validado. A execução manual na aba **Actions** continua disponível.
 
 ## 1. Criar a chave privada (uma única vez)
 Na sua máquina, com o JDK instalado:
@@ -34,7 +34,9 @@ Copie o conteúdo do arquivo base64 como secret e **exclua o arquivo base64 temp
 
 ## 3. Gerar APK
 
-Abra **Actions > Signed release APK > Run workflow**, selecione `main`, execute e baixe o artifact `appmetricas-signed-release-<numero>`. O número de versão aumenta por execução do workflow.
+Após um merge aprovado na `main`, aguarde o **Android CI** e depois o **Signed release APK**. Baixe o artifact `appmetricas-signed-release-<numero>`. O número de versão aumenta por execução do workflow.
+
+Para gerar novamente de forma manual, abra **Actions > Signed release APK > Run workflow**, selecione `main` e execute.
 
 ## Regras para atualizar um APK instalado
 
