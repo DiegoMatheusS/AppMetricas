@@ -115,8 +115,9 @@ internal class ProBilling(private val context: Context,
             state = state.copy(busy = true)
             // Query again: do not launch a purchase with cached ProductDetails or an expired offer token.
             loadProduct { product, offer ->
-                val params = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(product)
-                    .setOfferToken(offer.offerToken).build()
+                val builder = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(product)
+                offer.offerToken?.let { builder.setOfferToken(it) }
+                val params = builder.build()
                 purchaseInProgress = true
                 state = state.copy(busy = true, message = null)
                 val result = client.launchBillingFlow(activity, BillingFlowParams.newBuilder()

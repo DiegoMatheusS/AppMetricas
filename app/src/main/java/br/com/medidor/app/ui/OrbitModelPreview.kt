@@ -35,11 +35,11 @@ import kotlin.math.sin
 @Composable
 fun OrbitModelPreview(plan: ArchitectPlan, allFloors: Boolean, showLines: Boolean) {
     val faces = remember(plan, allFloors) { Architect3dGeometry.model(plan, allFloors) }
-    MeshModelPreview(faces, showLines)
+    MeshModelPreview(faces, showLines, "Prévia 3D do projeto. Confira a escala, as paredes e as aberturas.")
 }
 
 @Composable
-internal fun MeshModelPreview(faces: List<ModelFace>, showLines: Boolean = true) {
+internal fun MeshModelPreview(faces: List<ModelFace>, showLines: Boolean = true, caption: String? = null) {
     var yaw by remember { mutableStateOf(.75f) }
     var elevation by remember { mutableStateOf(.65f) }
     var zoom by remember { mutableStateOf(1f) }
@@ -124,7 +124,6 @@ internal fun MeshModelPreview(faces: List<ModelFace>, showLines: Boolean = true)
             elevation = .65f
             zoom = 1f
         }) { Text("Redefinir câmera") }
-        Text("Prévia 3D geométrica baseada em paredes marcadas manualmente. " +
-            "Portas e janelas são aberturas na malha. Ainda não há realidade aumentada.")
+        caption?.let { Text(it) }
     }
 }

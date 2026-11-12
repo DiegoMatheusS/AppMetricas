@@ -137,6 +137,7 @@ class ArchitectPlanStore(private val context: Context) {
         try {
             check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)) { "Falha ao salvar imagem" }
             atomic.finishWrite(stream)
+            check(file.isFile && file.length() > 0) { "Não foi possível concluir a gravação da planta." }
         } catch (error: Exception) { atomic.failWrite(stream); throw error }
         return fileName
     }
