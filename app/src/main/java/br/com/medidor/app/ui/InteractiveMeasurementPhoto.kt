@@ -31,6 +31,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +50,14 @@ internal fun InteractiveMeasurementPhoto(
     calibrated: Boolean,
     areaMode: Boolean,
     pointSize: MeasurementPointSize,
+    title: String,
+    message: String,
+    leadingActions: List<MeasureAction>,
+    trailingActions: List<MeasureAction>,
+    referencePicking: Boolean,
+    resetKey: Int,
+    onReferenceModeChange: (Boolean) -> Unit,
+    automaticAvailable: Boolean,
     referenceCaption: String?,
     edgeCaption: (Double) -> String?,
     areaCaption: String?,
@@ -64,12 +73,14 @@ internal fun InteractiveMeasurementPhoto(
     var panX by remember(photo) { mutableStateOf(0f) }
     var panY by remember(photo) { mutableStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
-    var objectMode by remember(photo) { mutableStateOf(true) }
-    var showEdges by remember(photo) { mutableStateOf(true) }
+    var objectMode by remember(photo) { mutableStateOf(false) }
+    var pointMode by remember(photo) { mutableStateOf(false) }
+    var showEdges by remember(photo) { mutableStateOf(false) }
     var global by remember(photo) { mutableStateOf(emptyList<ObjectOutline>()) }
     var detail by remember(photo) { mutableStateOf(emptyList<ObjectOutline>()) }
     var scanning by remember(photo) { mutableStateOf(true) }
     var selected by remember(photo) { mutableStateOf<ObjectOutline?>(null) }
+    var pendingObject by remember(photo) { mutableStateOf<ObjectOutline?>(null) }
     var matches by remember(photo) { mutableStateOf(emptyList<ObjectOutline>()) }
     var selectionIndex by remember(photo) { mutableStateOf(0) }
     var selectionSerial by remember(photo) { mutableStateOf(0) }
@@ -82,6 +93,7 @@ internal fun InteractiveMeasurementPhoto(
     fun move(next: PhotoViewport) { zoom = next.zoom; panX = next.panX; panY = next.panY }
     fun applySelection(outline: ObjectOutline) {
         selected = outline
+        pendingObject = outline
         selectionSerial++
         if (calibrated) {
             points.clear()
@@ -89,7 +101,7 @@ internal fun InteractiveMeasurementPhoto(
             onChanged()
             onAutomaticArea(if (areaMode) ObjectSelectionGeometry.areaPixels(outline, photo.width, photo.height) else null)
             onNotice("Objeto selecionado")
-        }
+        } else onNotice("Objeto selecionado sem escala. Auto mede no ambiente; Escala calibra a foto.")
     }
 
     LaunchedEffect(photo) {
@@ -112,21 +124,27 @@ internal fun InteractiveMeasurementPhoto(
         catch (_: Exception) { detail = emptyList() }
     }
     LaunchedEffect(areaMode, calibrated) {
-        selected = null; matches = emptyList(); onAutomaticArea(null)
+        onAutomaticArea(null)
+        if (calibrated) pendingObject?.let(::applySelection)
+    }
+    LaunchedEffect(resetKey) {
+        if (resetKey > 0) {
+            selected = null; pendingObject = null; matches = emptyList(); objectMode = false; pointMode = false; onAutomaticArea(null)
+        }
     }
     LaunchedEffect(points.size, calibrated) {
         val outline = selected
         if (calibrated && outline != null && points.size < (if (areaMode) outline.corners.size else 2)) {
-            selected = null; matches = emptyList(); onAutomaticArea(null)
+            selected = null; pendingObject = null; matches = emptyList(); onAutomaticArea(null)
         }
     }
-    LaunchedEffect(initialSeed, global, calibrated, areaMode) {
+    LaunchedEffect(initialSeed, global, areaMode) {
         if (initialSeed != null && !seedUsed && global.isNotEmpty()) {
             val found = ObjectSelectionGeometry.hits(global,initialSeed,photo.width,photo.height,
                 maxOf(photo.width,photo.height) * .02,areaMode)
             if (found.isNotEmpty()) {
                 matches = found; selectionIndex = 0; applySelection(found.first())
-                if (calibrated) seedUsed = true
+                seedUsed = true
             }
         }
     }
@@ -136,40 +154,18 @@ internal fun InteractiveMeasurementPhoto(
     }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            FilterChip(selected = objectMode,onClick = { objectMode = true },label = { Text("Objeto") })
-            FilterChip(selected = !objectMode,onClick = {
-                if (objectMode) {
-                    points.clear(); selected = null; matches = emptyList()
-                    onAutomaticArea(null); onChanged(); onNotice(null)
-                }
-                objectMode = false
-            },label = { Text("Pontos") })
-            TextButton(onClick = onPointOptions) { Text("Ponto") }
-            TextButton(onClick = { showEdges = !showEdges }) { Text(if (showEdges) "Ocultar arestas" else "Arestas") }
-        }
-        Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.SpaceBetween) {
-            Row {
-                listOf(1,2,4,8).forEach { level ->
-                    TextButton(onClick = {
-                        viewport()?.let { map ->
-                            val focus = selected?.corners?.let { list -> map.view(NormalizedPoint(
-                                list.map { it.x }.average().toFloat(),list.map { it.y }.average().toFloat())) }
-                            move(map.transform(level / zoom,focus?.first ?: map.viewWidth/2,focus?.second ?: map.viewHeight/2))
-                        }
-                    }) { Text(level.toString() + "×") }
-                }
-            }
-        }
-        if (matches.size > 1 && calibrated) Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.End) {
-                if (selectionIndex > 0) TextButton(onClick = { selectionIndex--; applySelection(matches[selectionIndex]) }) { Text("Reduzir") }
-                if (selectionIndex < matches.lastIndex) TextButton(onClick = { selectionIndex++; applySelection(matches[selectionIndex]) }) { Text("Ampliar seleção") }
-        }
-        if (scanning) Text("Escaneando arestas…",fontSize = 11.sp)
         Canvas(Modifier.fillMaxWidth().weight(1f).clipToBounds().background(Color(0xFF202722))
             .onSizeChanged { viewSize = it }
-            .semantics { contentDescription = "Área de marcação da foto" }
-            .pointerInput(photo,calibrated,areaMode,pointSize) {
+            .semantics {
+                contentDescription = "Área de marcação da foto"
+                stateDescription = when {
+                    referencePicking -> "Referência ativa · ${reference.size} pontos"
+                    objectMode -> "Seleção de objeto ativa"
+                    pointMode -> "Marcação ativa · ${points.size} pontos"
+                    else -> "Toque desativado · ${points.size} pontos"
+                }
+            }
+            .pointerInput(photo,calibrated,areaMode,pointSize,referencePicking) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
@@ -220,25 +216,26 @@ internal fun InteractiveMeasurementPhoto(
                         previous = change.position
                         if (!change.pressed) {
                             loupe = null
-                            if (!moved && mapped != null) {
+                            if (!moved && mapped != null && (objectMode || pointMode || referencePicking)) {
                                 if (selectedPoint != null) {
-                                    onPointOptions()
+                                    // A tap on an existing point is inert; drag it to adjust.
                                 } else {
                                     val scene = (detail + global)
-                                    val found = if (calibrated && objectMode)
+                                    val found = if (objectMode && (calibrated || !referencePicking))
                                         ObjectSelectionGeometry.hits(scene,mapped,photo.width,photo.height,
                                             (pointSize.radiusDp.dp.toPx() / (map().fit * zoom)).toDouble(),areaMode) else emptyList()
                                     if (found.isNotEmpty()) {
                                         matches = found; selectionIndex = 0; applySelection(found.first())
                                     } else {
-                                        val destination = if (!calibrated) reference else points
-                                        val limit = if (!calibrated || !areaMode) 2 else 12
+                                        val markingReference = !calibrated && referencePicking
+                                        val destination = if (markingReference) reference else points
+                                        val limit = if (markingReference || !areaMode) 2 else 12
                                         if (destination.size < limit && destination.none {
                                             PhotoCalibration.distancePixels(it,mapped,photo.width,photo.height) < 2
                                         }) {
-                                            if (calibrated) { selected = null; matches = emptyList(); onAutomaticArea(null) }
+                                            if (!markingReference) { selected = null; pendingObject = null; matches = emptyList(); onAutomaticArea(null) }
                                             destination.add(mapped); onChanged(); onNotice(null)
-                                            if (!calibrated && reference.size == 2) onReferenceComplete()
+                                            if (markingReference && reference.size == 2) onReferenceComplete()
                                         } else onNotice("Arraste uma ponta ou toque em outro objeto.")
                                     }
                                 }
@@ -258,15 +255,15 @@ internal fun InteractiveMeasurementPhoto(
             val amber = Color(0xFFFFB443)
             if (showEdges) (detail + global).take(64).forEach { outline ->
                 val path = Path()
-                outline.trace.forEachIndexed { index, point ->
+                outline.corners.forEachIndexed { index, point ->
                     val p = position(point)
                     if (index == 0) path.moveTo(p.x,p.y) else path.lineTo(p.x,p.y)
                 }
-                if (outline.trace.size >= 3) path.close()
+                if (outline.corners.size >= 3) path.close()
                 drawPath(path,Color.White.copy(alpha = .33f),style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
             }
             selected?.let { outline ->
-                ObjectSelectionEffect.draw(native,outline.trace.map { position(it).let { p -> PointF(p.x,p.y) } },
+                ObjectSelectionEffect.draw(native,outline.corners.map { position(it).let { p -> PointF(p.x,p.y) } },
                     RectF(0f,0f,size.width,size.height),shine.value,density)
             }
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -281,6 +278,11 @@ internal fun InteractiveMeasurementPhoto(
                 native.drawRoundRect(x-width/2,y-height/2,x+width/2,y+height/2,8f,8f,background)
                 native.drawText(text,x,y-(textPaint.ascent()+textPaint.descent())/2,textPaint)
             }
+            if (!calibrated && selected != null) {
+                val shape = selected!!.corners
+                label(if (automaticAvailable) "Auto: medir em cm" else "Defina a escala",
+                    Offset(shape.map { position(it).x }.average().toFloat(),shape.map { position(it).y }.average().toFloat()))
+            }
             fun edge(a: NormalizedPoint,b: NormalizedPoint,color: Color,caption: String?) {
                 val start = position(a); val end = position(b)
                 drawLine(color,start,end,2.5.dp.toPx())
@@ -291,6 +293,10 @@ internal fun InteractiveMeasurementPhoto(
             repeat(count) { index ->
                 val a = points[index]; val b = points[(index+1)%points.size]
                 edge(a,b,lime,edgeCaption(PhotoCalibration.distancePixels(a,b,photo.width,photo.height)))
+            }
+            if (!calibrated && points.size >= 2) {
+                val center = Offset(points.map { position(it).x }.average().toFloat(),points.map { position(it).y }.average().toFloat())
+                label(if (automaticAvailable) "Sem escala · use Auto" else "Sem escala · use Escala",center)
             }
             if (areaCaption != null && points.size >= 3)
                 label(areaCaption,Offset(points.map { position(it).x }.average().toFloat(),points.map { position(it).y }.average().toFloat()))
@@ -313,6 +319,50 @@ internal fun InteractiveMeasurementPhoto(
                 drawLine(Color.White,center-Offset(12.dp.toPx(),0f),center+Offset(12.dp.toPx(),0f),1.dp.toPx())
                 drawLine(Color.White,center-Offset(0f,12.dp.toPx()),center+Offset(0f,12.dp.toPx()),1.dp.toPx())
             }
+        }
+        val activeMessage = when {
+            scanning -> "Escaneando arestas…"
+            !calibrated && referencePicking -> "Referência ativa: marque as duas pontas de um tamanho conhecido."
+            !calibrated && pointMode -> "Pontos ativo. Auto mede em centímetros; Escala calibra esta foto."
+            else -> message
+        }
+        MeasurementDock(title,activeMessage) {
+            MeasurementToolRow(leadingActions)
+            MeasurementToolRow(listOf(
+                MeasureAction("Objeto", "Selecionar objeto", MeasureIcon.OBJECT, selected = objectMode, action = {
+                    objectMode = !objectMode; pointMode = false; onReferenceModeChange(false)
+                    onNotice(if (objectMode) "Objeto ativo: toque no objeto para selecioná-lo." else null)
+                }),
+                MeasureAction("Pontos", "Marcar pontos na foto", MeasureIcon.POINT, selected = pointMode, action = {
+                    if (objectMode) {
+                        points.clear(); selected = null; pendingObject = null; matches = emptyList()
+                        onAutomaticArea(null); onChanged(); onNotice(null)
+                    }
+                    objectMode = false; pointMode = !pointMode
+                    if (!calibrated) onReferenceModeChange(false)
+                    onNotice(if (!pointMode) null else if (!calibrated) "Pontos ativo. Auto mede em centímetros; Escala calibra esta foto."
+                        else if (areaMode) "Pontos ativo: marque os cantos da área." else "Pontos ativo: marque os dois extremos da medida.")
+                }),
+                MeasureAction("Ponto", "Tamanho do ponto", MeasureIcon.POINT, action = onPointOptions),
+                MeasureAction("Arestas", if (showEdges) "Ocultar arestas" else "Mostrar arestas", MeasureIcon.EDGES,
+                    selected = showEdges, action = { showEdges = !showEdges }),
+                MeasureAction("Reduzir", "Reduzir seleção", MeasureIcon.OBJECT,
+                    enabled = selectionIndex > 0 && matches.isNotEmpty(), action = {
+                        selectionIndex--; applySelection(matches[selectionIndex])
+                    }),
+                MeasureAction("Ampliar", "Ampliar seleção", MeasureIcon.OBJECT,
+                    enabled = selectionIndex < matches.lastIndex, action = {
+                        selectionIndex++; applySelection(matches[selectionIndex])
+                    })
+            ))
+            MeasurementToolRow(listOf(1,2,4,8).map { level ->
+                MeasureAction(level.toString()+"×", "Zoom da foto de $level vezes", selected = kotlin.math.abs(zoom-level)<.05f,
+                    action = { viewport()?.let { map ->
+                        val focus = selected?.corners?.let { list -> map.view(NormalizedPoint(
+                            list.map { it.x }.average().toFloat(),list.map { it.y }.average().toFloat())) }
+                        move(map.transform(level/zoom,focus?.first ?: map.viewWidth/2,focus?.second ?: map.viewHeight/2))
+                    } })
+            } + trailingActions)
         }
     }
 }

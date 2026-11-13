@@ -23,6 +23,88 @@ import kotlin.math.min
 class PointMeasurementUiTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun cameraTapsAreInertUntilThePointButtonIsChosen() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        var automaticCalls = 0
+        var pointCalls = 0
+        var photoCalls = 0
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent { MedidorTheme {
+                    LiveContourCamera(onPhoto = { photoCalls++ }, onError = {}, onAr = { automaticCalls++ },
+                        onArPoints = { pointCalls++ })
+                } }
+            }
+            tapPhoto(.5f,.5f,"Visor livre da câmera")
+            assertEquals(0,automaticCalls)
+            assertEquals(0,photoCalls)
+            assertEquals(0,pointCalls)
+            click("Marcar pontos no ambiente sem informar tamanho")
+            assertEquals(1,pointCalls)
+            assertEquals(0,automaticCalls)
+            assertNull(node("Quanto mede a linha amarela?"))
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
+    @Test fun largerTextKeepsInstructionsAndButtonsBelowThePhoto() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        val photo = Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) }
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent {
+                    val display = androidx.compose.ui.platform.LocalDensity.current
+                    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                        androidx.compose.ui.unit.Density(display.density,1.5f)) {
+                        MedidorTheme { PointPhotoMeasurementScreen(photo,false,{}, { _, _ -> }) }
+                    }
+                }
+            }
+            val instruction = "Foto: toque inativo. Ative Escala ou Objeto; Auto mede no ambiente sem referência."
+            waitFor(instruction)
+            val image = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            val text = Rect().also { node(instruction)!!.getBoundsInScreen(it) }
+            val button = Rect().also { clickable("Definir escala da foto")!!.getBoundsInScreen(it) }
+            assertTrue("Foto continua visível com fonte maior",image.height() > 100)
+            assertTrue("Texto fica inteiramente no painel",text.top >= image.bottom && text.bottom <= button.top)
+            assertTrue("Instrução pode quebrar linhas",text.height() > 20)
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
+    @Test fun selectedPhotoExplainsScaleAndOpensAutomaticMeasurementWithoutAskingForSize() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        val photo = Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(photo).apply {
+            drawColor(android.graphics.Color.WHITE)
+            drawRect(400f,240f,720f,480f,android.graphics.Paint().apply { color = android.graphics.Color.DKGRAY })
+        }
+        var automaticOpened = false
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent { MedidorTheme {
+                    PointPhotoMeasurementScreen(photo,false,{}, { _, _ -> fail("Foto sem escala não deve salvar uma medida") },
+                        br.com.medidor.app.domain.NormalizedPoint(.7f,.6f), onAutomatic = { automaticOpened = true })
+                } }
+            }
+            waitFor("Objeto selecionado sem escala. Auto mede no ambiente; Escala calibra a foto.")
+            assertFalse(clickable("Salvar")!!.isEnabled)
+            assertNull(node("Quanto mede a linha amarela?"))
+            val image = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            val controls = listOf("Voltar à câmera","Régua","Área","Medir automaticamente no ambiente","Definir escala da foto","Salvar")
+                .map { text -> Rect().also { clickable(text)!!.getBoundsInScreen(it) } }
+            controls.forEach { bounds ->
+                assertTrue("Botões abaixo da foto",bounds.top >= image.bottom)
+                assertTrue("Mesmo tamanho",kotlin.math.abs(bounds.height()-controls[0].height()) <= 2 &&
+                    kotlin.math.abs(bounds.width()-controls[0].width()) <= 2)
+            }
+            click("Medir automaticamente no ambiente")
+            assertTrue("Acesso direto à medição automática",automaticOpened)
+            assertNull(node("Quanto mede a linha amarela?"))
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
     @Test fun tappingAnotherObjectRecalculatesOnlyItsOwnEdges() {
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
@@ -42,8 +124,10 @@ class PointMeasurementUiTest {
             val deadline = SystemClock.elapsedRealtime()+10_000
             while (node("Escaneando arestas…") != null && SystemClock.elapsedRealtime()<deadline) Thread.sleep(100)
             assertNull("Escaneamento concluído",node("Escaneando arestas…"))
+            click("Definir escala da foto"); click("Marcar referência")
             tapPhoto(.1f,.15f); tapPhoto(.5f,.15f)
             click("Aplicar escala")
+            click("Selecionar objeto")
             tapPhoto(.2f,.6f)
             waitFor("Objeto selecionado")
             click("Salvar")
@@ -76,8 +160,17 @@ class PointMeasurementUiTest {
             instrumentation.runOnMainSync {
                 activity.setContent { MedidorTheme { PointPhotoMeasurementScreen(photo,false,{}, { _, value -> saved.add(value) }) } }
             }
-            waitFor("Régua por pontos")
+            waitFor("Foto · Régua")
             assertFalse(clickable("Salvar")!!.isEnabled)
+            tapPhoto(.1f,.2f); tapPhoto(.5f,.2f)
+            assertNull("Toques não ativam marcação ou calibração sem um botão",node("Quanto mede a linha amarela?"))
+            assertFalse(clickable("Salvar")!!.isEnabled)
+            click("Marcar pontos na foto")
+            tapPhoto(.1f,.8f); tapPhoto(.9f,.8f)
+            assertNull("Pontos não pedem um tamanho; somente Escala ativa a referência",node("Quanto mede a linha amarela?"))
+            assertFalse(clickable("Salvar")!!.isEnabled)
+            click("Refazer")
+            click("Definir escala da foto"); click("Marcar referência")
             val first = tapPhoto(.1f,.2f)
             SystemClock.sleep(100)
             val screen = instrumentation.uiAutomation.takeScreenshot()!!
@@ -94,15 +187,25 @@ class PointMeasurementUiTest {
             tapPhoto(.5f,.2f)
             waitFor("Quanto mede a linha amarela?")
             click("Aplicar escala") // Explicitly confirms the displayed 10 cm reference.
+            waitFor("Área de marcação da foto")
+            val viewportBeforeMode = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            click("Marcar pontos na foto")
+            waitForPhotoState("Marcação ativa")
+            val viewportAfterMode = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            assertEquals("Trocar a instrução não desloca a fotografia",viewportBeforeMode,viewportAfterMode)
             tapPhoto(.1f,.8f); tapPhoto(.9f,.8f)
             waitFor("Distância: 20 cm")
             click("Salvar")
             instrumentation.waitForIdleSync()
             assertEquals(1,saved.size)
             assertTrue(saved[0].startsWith("Distância: 20 cm"))
+            click("Marcar pontos na foto") // Turn placement off; existing ends stay draggable.
+            tapPhoto(.5f,.4f)
+            waitFor("Distância: 20 cm")
             dragPhoto(.9f,.8f,.7f,.8f)
             waitFor("Distância: 15 cm")
             click("Área")
+            click("Marcar pontos na foto")
             tapPhoto(.1f,.5f); tapPhoto(.9f,.5f); tapPhoto(.9f,.9f); tapPhoto(.1f,.9f)
             waitFor("Área: 150 cm²")
             click("Salvar")
@@ -110,7 +213,7 @@ class PointMeasurementUiTest {
             assertEquals(2,saved.size)
             assertTrue(saved[1].startsWith("Área: 150 cm²"))
             click("Refazer")
-            waitFor("Área por pontos")
+            waitFor("Foto · Área")
             assertFalse(clickable("Salvar")!!.isEnabled)
             instrumentation.runOnMainSync {
                 activity.setContent { MedidorTheme {
@@ -138,12 +241,30 @@ class PointMeasurementUiTest {
     private fun waitFor(text: String) {
         val deadline = SystemClock.elapsedRealtime()+10_000
         while (node(text)==null && SystemClock.elapsedRealtime()<deadline) Thread.sleep(100)
-        assertNotNull("Controle ou resultado esperado: $text",node(text))
+        val found = node(text)
+        if (found == null) {
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val pending = ArrayDeque<AccessibilityNodeInfo>().apply { root?.let(::add) }
+            val visible = mutableListOf<String>()
+            while (pending.isNotEmpty()) {
+                val next = pending.removeFirst()
+                next.text?.toString()?.let(visible::add)
+                repeat(next.childCount) { next.getChild(it)?.let(pending::addLast) }
+            }
+            fail("Controle ou resultado esperado: $text; foto=${node("Área de marcação da foto")?.stateDescription}; textos=${visible.distinct().joinToString(" | ")}")
+        }
     }
     private fun clickable(text: String): AccessibilityNodeInfo? {
         var current = node(text)
         repeat(8) { if (current?.isClickable == true) return current; current = current?.parent }
         return null
+    }
+    private fun waitForPhotoState(expected: String) {
+        val deadline = SystemClock.elapsedRealtime()+5_000
+        while (node("Área de marcação da foto")?.stateDescription?.toString()?.startsWith(expected) != true &&
+            SystemClock.elapsedRealtime() < deadline) Thread.sleep(50)
+        assertTrue("Modo esperado: $expected; atual: ${node("Área de marcação da foto")?.stateDescription}",
+            node("Área de marcação da foto")?.stateDescription?.toString()?.startsWith(expected) == true)
     }
     private fun click(text: String) {
         waitFor(text)

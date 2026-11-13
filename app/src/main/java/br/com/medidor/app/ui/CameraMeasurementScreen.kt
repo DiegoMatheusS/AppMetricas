@@ -78,6 +78,10 @@ import br.com.medidor.app.domain.ReferenceMarkQuality
 import br.com.medidor.app.domain.TankShape
 import br.com.medidor.app.domain.TankCameraCapture
 import java.io.File
+import com.google.ar.core.ArCoreApk
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import kotlin.math.min
 
 /**
@@ -92,19 +96,23 @@ fun CameraMeasurementScreen(
     onBack: () -> Unit = {},
     onManual: () -> Unit = {},
     onSwitchTool: (LiveMeasureTool) -> Unit = {},
-    onTankArResult: (TankCameraCapture) -> Unit = {}
+    onTankArResult: (TankCameraCapture) -> Unit = {},
+    startInEnvironment: Boolean = true
 ) {
     val context = LocalContext.current
     var arLaunchRequested by remember { mutableStateOf(false) }
     var arOpen by rememberSaveable { mutableStateOf(false) }
     var chooseTankShape by remember { mutableStateOf(false) }
     var tankShapeForAr by remember { mutableStateOf<TankShape?>(null) }
-    var chooseEnvironment by remember { mutableStateOf(false) }
     var automaticEnvironment by remember { mutableStateOf(true) }
+    var environmentEntered by rememberSaveable(liveTool) { mutableStateOf(false) }
+    var autoEntryAllowed by remember(liveTool) { mutableStateOf(true) }
+    var screenError by remember { mutableStateOf<String?>(null) }
     val arLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         arOpen = false
+        result.data?.getStringExtra(ArMeasurementActivity.EXTRA_NOTICE)?.let { screenError = it }
         if (liveTool == LiveMeasureTool.TANK && result.resultCode == Activity.RESULT_OK) {
             val data = result.data
             val shape = TankShape.entries.firstOrNull {
@@ -119,11 +127,30 @@ fun CameraMeasurementScreen(
             }
         }
     }
-    fun openAr() {
+    fun openAr(automatic: Boolean = true) {
+        autoEntryAllowed = false
         if (liveTool == LiveMeasureTool.TANK) {
             chooseTankShape = true
         } else {
-            chooseEnvironment = true
+            automaticEnvironment = automatic
+            arOpen = true
+            arLaunchRequested = true
+        }
+    }
+    LaunchedEffect(startInEnvironment,liveTool) {
+        if (startInEnvironment && liveTool != LiveMeasureTool.TANK && !environmentEntered) {
+            environmentEntered = true
+            val availability = withTimeoutOrNull(1800) {
+                suspendCancellableCoroutine<ArCoreApk.Availability> { pending ->
+                    ArCoreApk.getInstance().checkAvailabilityAsync(context.applicationContext) { value ->
+                        if (pending.isActive) pending.resume(value)
+                    }
+                }
+            }
+            if (!autoEntryAllowed || arOpen) return@LaunchedEffect
+            if (availability == ArCoreApk.Availability.SUPPORTED_INSTALLED) openAr()
+            else if (availability?.isSupported == true) screenError = "Toque em Auto para ativar a medição no ambiente. Foto usa uma referência conhecida."
+            else screenError = "Auto depende do suporte do aparelho. Use Auto para verificar ou Foto com uma referência conhecida."
         }
     }
     LaunchedEffect(arLaunchRequested) {
@@ -137,13 +164,6 @@ fun CameraMeasurementScreen(
             ))
         }
     }
-    if (chooseEnvironment) AlertDialog(
-        onDismissRequest = { chooseEnvironment = false },
-        title = { Text("Medir no ambiente") },
-        text = { Text("Os pontos ficam presos à superfície enquanto você move o celular. É necessário um aparelho compatível. Escolha encontrar o objeto ou marcar as pontas.") },
-        confirmButton = { TextButton(onClick = { automaticEnvironment = true; chooseEnvironment = false; arOpen = true; arLaunchRequested = true }) { Text("Encontrar objeto") } },
-        dismissButton = { TextButton(onClick = { automaticEnvironment = false; chooseEnvironment = false; arOpen = true; arLaunchRequested = true }) { Text("Marcar pontas") } }
-    )
     if (chooseTankShape) {
         AlertDialog(
             onDismissRequest = { chooseTankShape = false },
@@ -171,11 +191,13 @@ fun CameraMeasurementScreen(
             }
         )
     }
-    // Remove CameraX preview while ARCore owns the camera.
-    if (arOpen) return
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED)
+    }
+    LaunchedEffect(arOpen) {
+        if (!arOpen) granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         granted = it
@@ -191,12 +213,12 @@ fun CameraMeasurementScreen(
     var seed by remember { mutableStateOf<NormalizedPoint?>(null) }
     var tolerance by remember { mutableStateOf(32) }
     var manualUnit by remember { mutableStateOf(LengthUnit.CENTIMETERS) }
-    var screenError by remember { mutableStateOf<String?>(null) }
     val points = remember { mutableStateListOf<NormalizedPoint>() }
     var saved by remember { mutableStateOf(false) }
     var selectedPointIndex by remember { mutableStateOf(0) }
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
+            autoEntryAllowed = false
             try {
                 bitmap = SampledPhotos.fromUri(context.contentResolver, uri)
                 objectSeed = null
@@ -213,15 +235,18 @@ fun CameraMeasurementScreen(
     if (bitmap != null && pointEditor) {
         BackHandler { bitmap = null; pointEditor = false }
         PointPhotoMeasurementScreen(bitmap!!, liveTool == LiveMeasureTool.AREA,
-            onBack = { bitmap = null; pointEditor = false }, onSave = onSave, initialObjectSeed = objectSeed)
+            onBack = { bitmap = null; pointEditor = false }, onSave = onSave, initialObjectSeed = objectSeed, onAutomatic = { openAr() })
         return
     }
+    // Keep a frozen photo and its edits alive behind AR; release only the live CameraX preview.
+    if (arOpen) return
     // The live analysis owns the entire portrait viewport. Photo calibration remains available
     // after capturing an analyzed frame; live sizes are only fractions of the image.
     if (bitmap == null && granted) {
         LiveContourCamera(
             onSelectionSeed = { objectSeed = it },
             onPhoto = {
+                autoEntryAllowed = false
                 bitmap = it
                 pointEditor = true
                 measureStyle = if (liveTool == LiveMeasureTool.AREA) "area" else "distance"
@@ -232,11 +257,12 @@ fun CameraMeasurementScreen(
             },
             onError = { error -> screenError = error },
             errorMessage = screenError,
-            onGallery = { pickPhoto.launch("image/*") },
+            onGallery = { autoEntryAllowed = false; pickPhoto.launch("image/*") },
             tool = liveTool,
             onBack = onBack,
             onManual = onManual,
-            onAr = ::openAr,
+            onAr = { openAr() },
+            onArPoints = { openAr(false) },
             onSwitchTool = onSwitchTool
         )
         return
@@ -283,7 +309,8 @@ fun CameraMeasurementScreen(
                         tool = liveTool,
                         onBack = onBack,
                         onManual = onManual,
-                        onAr = ::openAr,
+                        onAr = { openAr() },
+                        onArPoints = { openAr(false) },
                         onSwitchTool = onSwitchTool
                     )
                 } else {
@@ -299,7 +326,7 @@ fun CameraMeasurementScreen(
                     )
                 }
             } else {
-                OutlinedButton(onClick = ::openAr) {
+                OutlinedButton(onClick = { openAr() }) {
                     Text(if (liveTool == LiveMeasureTool.TANK) "Medir tanque em AR" else "Medir em AR")
                 }
                 Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {

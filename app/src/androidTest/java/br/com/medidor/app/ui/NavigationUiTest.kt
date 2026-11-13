@@ -32,6 +32,16 @@ class NavigationUiTest {
             val bounds = android.graphics.Rect()
             node("Marcar pontos")!!.getBoundsInScreen(bounds)
             assertTrue("Botão de pontos visível na câmera",bounds.width() > 0 && bounds.height() > 0)
+            val camera = android.graphics.Rect().also { node("Visor livre da câmera")!!.getBoundsInScreen(it) }
+            val labels = listOf("Voltar", "Medir distância", "Medir área", "Medir automaticamente no ambiente",
+                "Marcar pontos na foto com referência", "Mais opções da câmera")
+            val buttons = labels.map { label -> android.graphics.Rect().also { node(label)!!.getBoundsInScreen(it) } }
+            assertTrue("Câmera ocupa a parte superior",camera.height() > 200 && camera.top < buttons.minOf { it.top })
+            buttons.forEach { button ->
+                assertTrue("Controles ficam inteiramente abaixo da câmera: $button, visor $camera",button.top >= camera.bottom)
+                assertTrue("Alturas padronizadas",kotlin.math.abs(button.height()-buttons.first().height()) <= 2)
+                assertTrue("Larguras padronizadas",kotlin.math.abs(button.width()-buttons.first().width()) <= 2)
+            }
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             waitForText("Ferramentas e ajustes")
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
