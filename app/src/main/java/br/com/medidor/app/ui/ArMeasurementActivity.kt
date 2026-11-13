@@ -126,7 +126,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
             contentDescription = "Visor livre da câmera"
             clipChildren = true
             addView(surface, FrameLayout.LayoutParams(MATCH_PARENT,MATCH_PARENT))
-            addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT,MATCH_PARENT))
+            addView(this@ArMeasurementActivity.overlay, FrameLayout.LayoutParams(MATCH_PARENT,MATCH_PARENT))
         }
         root.addView(cameraFrame,LinearLayout.LayoutParams(MATCH_PARENT,0,1f))
         val footer = panel().apply {

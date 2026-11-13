@@ -165,11 +165,13 @@ fun CameraMeasurementScreen(
             }
         )
     }
-    // Remove CameraX preview while ARCore owns the camera.
-    if (arOpen) return
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED)
+    }
+    LaunchedEffect(arOpen) {
+        if (!arOpen) granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         granted = it
@@ -210,6 +212,8 @@ fun CameraMeasurementScreen(
             onBack = { bitmap = null; pointEditor = false }, onSave = onSave, initialObjectSeed = objectSeed, onAutomatic = { openAr() })
         return
     }
+    // Keep a frozen photo and its edits alive behind AR; release only the live CameraX preview.
+    if (arOpen) return
     // The live analysis owns the entire portrait viewport. Photo calibration remains available
     // after capturing an analyzed frame; live sizes are only fractions of the image.
     if (bitmap == null && granted) {
