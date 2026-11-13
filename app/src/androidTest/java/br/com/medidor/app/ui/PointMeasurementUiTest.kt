@@ -23,6 +23,64 @@ import kotlin.math.min
 class PointMeasurementUiTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun largerTextKeepsInstructionsAndButtonsBelowThePhoto() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        val photo = Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) }
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent {
+                    val display = androidx.compose.ui.platform.LocalDensity.current
+                    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                        androidx.compose.ui.unit.Density(display.density,1.5f)) {
+                        MedidorTheme { PointPhotoMeasurementScreen(photo,false,{}, { _, _ -> }) }
+                    }
+                }
+            }
+            val instruction = "Foto: marque uma referência conhecida. Para calcular sem digitar tamanho, use Auto."
+            waitFor(instruction)
+            val image = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            val text = Rect().also { node(instruction)!!.getBoundsInScreen(it) }
+            val button = Rect().also { clickable("Definir escala da foto")!!.getBoundsInScreen(it) }
+            assertTrue("Foto continua visível com fonte maior",image.height() > 100)
+            assertTrue("Texto fica inteiramente no painel",text.top >= image.bottom && text.bottom <= button.top)
+            assertTrue("Instrução pode quebrar linhas",text.height() > 20)
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
+    @Test fun selectedPhotoExplainsScaleAndOpensAutomaticMeasurementWithoutAskingForSize() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        val photo = Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(photo).apply {
+            drawColor(android.graphics.Color.WHITE)
+            drawRect(400f,240f,720f,480f,android.graphics.Paint().apply { color = android.graphics.Color.DKGRAY })
+        }
+        var automaticOpened = false
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent { MedidorTheme {
+                    PointPhotoMeasurementScreen(photo,false,{}, { _, _ -> fail("Foto sem escala não deve salvar uma medida") },
+                        br.com.medidor.app.domain.NormalizedPoint(.7f,.6f), onAutomatic = { automaticOpened = true })
+                } }
+            }
+            waitFor("Objeto selecionado sem escala. Auto mede no ambiente; Escala calibra a foto.")
+            assertFalse(clickable("Salvar")!!.isEnabled)
+            assertNull(node("Quanto mede a linha amarela?"))
+            val image = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            val controls = listOf("Voltar à câmera","Régua","Área","Medir automaticamente no ambiente","Definir escala da foto","Salvar")
+                .map { text -> Rect().also { clickable(text)!!.getBoundsInScreen(it) } }
+            controls.forEach { bounds ->
+                assertTrue("Botões abaixo da foto",bounds.top >= image.bottom)
+                assertTrue("Mesmo tamanho",kotlin.math.abs(bounds.height()-controls[0].height()) <= 2 &&
+                    kotlin.math.abs(bounds.width()-controls[0].width()) <= 2)
+            }
+            click("Medir automaticamente no ambiente")
+            assertTrue("Acesso direto à medição automática",automaticOpened)
+            assertNull(node("Quanto mede a linha amarela?"))
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
     @Test fun tappingAnotherObjectRecalculatesOnlyItsOwnEdges() {
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
@@ -76,7 +134,7 @@ class PointMeasurementUiTest {
             instrumentation.runOnMainSync {
                 activity.setContent { MedidorTheme { PointPhotoMeasurementScreen(photo,false,{}, { _, value -> saved.add(value) }) } }
             }
-            waitFor("Régua por pontos")
+            waitFor("Foto · Régua")
             assertFalse(clickable("Salvar")!!.isEnabled)
             val first = tapPhoto(.1f,.2f)
             SystemClock.sleep(100)
@@ -110,7 +168,7 @@ class PointMeasurementUiTest {
             assertEquals(2,saved.size)
             assertTrue(saved[1].startsWith("Área: 150 cm²"))
             click("Refazer")
-            waitFor("Área por pontos")
+            waitFor("Foto · Área")
             assertFalse(clickable("Salvar")!!.isEnabled)
             instrumentation.runOnMainSync {
                 activity.setContent { MedidorTheme {

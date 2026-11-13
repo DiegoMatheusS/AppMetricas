@@ -118,11 +118,21 @@ internal class ArMeasurementActivity : ComponentActivity() {
         overlay.pointSize = pointPreferences.pointSize
         surface.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updatePointRadius() }
 
-        val root = FrameLayout(this)
-        root.addView(surface, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        root.addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        val header = panel().apply {
-            addView(label(19f).apply {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(20,37,31))
+        }
+        val cameraFrame = FrameLayout(this).apply {
+            contentDescription = "Visor livre da câmera"
+            clipChildren = true
+            addView(surface, FrameLayout.LayoutParams(MATCH_PARENT,MATCH_PARENT))
+            addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT,MATCH_PARENT))
+        }
+        root.addView(cameraFrame,LinearLayout.LayoutParams(MATCH_PARENT,0,1f))
+        val footer = panel().apply {
+            contentDescription = "Controles inferiores de medição"
+            setPadding(dp(10),dp(10),dp(10),dp(10))
+            addView(label(17f).apply {
                 text = when {
                     tankShape != null -> "Tanque no ambiente"
                     areaMode -> "Área no ambiente"
@@ -130,88 +140,75 @@ internal class ArMeasurementActivity : ComponentActivity() {
                 }
                 typeface = Typeface.DEFAULT_BOLD
             })
-            status = label(15f).apply { text = "Preparando a câmera em AR…" }
-            addView(status)
-            addView(LinearLayout(context).apply modes@{
-                automatic = Button(context).apply {
-                    text = "Automático"
-                    setOnClickListener {
-                        saved = false
-                        surface.queueEvent { renderer.setAutomatic(true) }
-                    }
-                }
-                manual = Button(context).apply {
-                    text = "Marcar pontos"
-                    setOnClickListener {
-                        saved = false
-                        surface.queueEvent { renderer.setAutomatic(false) }
-                    }
-                }
-                addView(automatic, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-                addView(manual, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            })
-            addView(Button(context).apply {
-                text = "Tamanho do ponto"
-                isAllCaps = false
-                setOnClickListener { choosePointSize() }
-            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        }
-        root.addView(header, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
-
-        val footer = panel().apply {
-            result = label(17f)
+            result = label(19f).apply { typeface = Typeface.DEFAULT_BOLD; visibility = View.GONE }
             addView(result)
-            if (tankShape != null) {
-                addView(label(13f).apply {
-                    text = "Caminhe devagar em volta do tanque para a câmera estimar a profundidade. " +
-                        "Confirme o diâmetro e depois a altura/comprimento. " +
-                        "O volume útil exige dimensões INTERNAS verificadas."
-                })
+            status = label(13f).apply {
+                text = "Reconhecendo a superfície. Mova a câmera devagar."
+                minHeight = dp(44)
+                setPadding(0,dp(5),0,dp(5))
+                setLineSpacing(dp(2).toFloat(),1f)
             }
-            confirm = Button(context).apply {
-                backgroundTintList = ColorStateList.valueOf(Color.rgb(192, 245, 101))
-                setTextColor(Color.rgb(20, 37, 31))
-                isAllCaps = false
-                isEnabled = false
-                text = if (tankShape == null) "Salvar medição" else "Confirmar dimensão"
-                setOnClickListener {
-                    isEnabled = false
-                    surface.queueEvent { confirmMeasurement() }
+            addView(status)
+            fun row() = LinearLayout(context).also { addView(it, LinearLayout.LayoutParams(MATCH_PARENT,WRAP_CONTENT)) }
+            fun action(row: LinearLayout, text: String, description: String, drawable: Int, run: () -> Unit): Button =
+                Button(context).apply {
+                    this.text = text
+                    contentDescription = description
+                    isAllCaps = false
+                    textSize = 11f
+                    maxLines = 1
+                    minWidth = 0; minHeight = 0
+                    setPadding(dp(2),dp(3),dp(2),dp(3))
+                    backgroundTintList = ColorStateList.valueOf(Color.rgb(38,57,46))
+                    setTextColor(Color.WHITE)
+                    val icon = ContextCompat.getDrawable(context,drawable)?.mutate()?.apply {
+                        setTint(Color.rgb(192,245,101)); setBounds(0,0,dp(18),dp(18))
+                    }
+                    setCompoundDrawables(null,icon,null,null)
+                    compoundDrawablePadding = dp(2)
+                    setOnClickListener { run() }
+                    row.addView(this,LinearLayout.LayoutParams(0,dp(54),1f).apply {
+                        setMargins(dp(2),dp(3),dp(2),dp(3))
+                    })
+                }
+            val modes = row()
+            automatic = action(modes,"Auto","Medir automaticamente",android.R.drawable.ic_menu_search) {
+                saved = false
+                surface.queueEvent { renderer.setAutomatic(true) }
+            }
+            manual = action(modes,"Pontos","Marcar pontos no ambiente",android.R.drawable.ic_menu_mylocation) {
+                saved = false
+                surface.queueEvent { renderer.setAutomatic(false) }
+            }
+            action(modes,"Ponto","Tamanho do ponto",android.R.drawable.ic_menu_edit,::choosePointSize)
+            action(modes,"Voltar","Voltar à câmera",android.R.drawable.ic_media_previous) { finish() }
+            val actions = row()
+            confirm = action(actions,if (tankShape == null) "Salvar" else "Confirmar", "Salvar medição",android.R.drawable.ic_menu_save) {
+                confirm.isEnabled = false
+                surface.queueEvent { confirmMeasurement() }
+            }
+            confirm.isEnabled = false
+            undo = action(actions,"Desfaz.","Desfazer",android.R.drawable.ic_menu_revert) {
+                saved = false
+                surface.queueEvent { renderer.undo() }
+            }
+            clear = action(actions,"Refazer","Refazer medição",android.R.drawable.ic_menu_rotate) {
+                saved = false
+                surface.queueEvent {
+                    if (tankShape != null) renderer.restartTankMeasurement() else renderer.clear()
                 }
             }
-            addView(confirm, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-            addView(LinearLayout(context).apply actions@{
-                fun addAction(name: String, action: () -> Unit): Button =
-                    Button(context).apply {
-                        text = name
-                        isAllCaps = false
-                        backgroundTintList = ColorStateList.valueOf(Color.rgb(38, 57, 46))
-                        setTextColor(Color.WHITE)
-                        setOnClickListener { action() }
-                        this@actions.addView(this, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-                    }
-                undo = addAction("Desfazer") {
-                    saved = false
-                    surface.queueEvent { renderer.undo() }
-                }
-                clear = addAction("Refazer") {
-                    saved = false
-                    surface.queueEvent {
-                        if (tankShape != null) renderer.restartTankMeasurement()
-                        else renderer.clear()
-                    }
-                }
-                undo.isEnabled = false
-                clear.isEnabled = false
-                addAction("Voltar") { finish() }
-            })
+            undo.isEnabled = false; clear.isEnabled = false
+            action(actions,"Ajuda","Ajuda da medição automática",android.R.drawable.ic_menu_help) {
+                AlertDialog.Builder(this@ArMeasurementActivity).setTitle("Medir sem informar tamanho")
+                    .setMessage("Mova o aparelho devagar até reconhecer a superfície. Em Auto, toque no objeto; em Pontos, marque os dois extremos. A medida aparece nas linhas e neste painel, sem pedir uma referência amarela. Confira a estabilidade antes de salvar.\n\nA leitura depende do suporte do aparelho. Se ele não reconhecer a superfície, volte e use Foto com uma referência conhecida no mesmo plano.")
+                    .setPositiveButton("Entendi",null).show()
+            }
         }
-        root.addView(footer, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
+        root.addView(footer,LinearLayout.LayoutParams(MATCH_PARENT,WRAP_CONTENT))
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or
-                WindowInsetsCompat.Type.displayCutout())
-            header.setPadding(safe.left + dp(16), safe.top + dp(12), safe.right + dp(16), dp(10))
-            footer.setPadding(safe.left + dp(12), dp(8), safe.right + dp(12), safe.bottom + dp(6))
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            root.setPadding(safe.left,safe.top,safe.right,safe.bottom)
             insets
         }
         setContentView(root)
@@ -365,7 +362,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
 
     private fun panel() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setBackgroundColor(Color.argb(234, 20, 37, 31))
+        setBackgroundColor(Color.rgb(20,37,31))
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()

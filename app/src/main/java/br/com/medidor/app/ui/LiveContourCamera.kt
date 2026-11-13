@@ -49,6 +49,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -105,6 +108,7 @@ internal fun LiveContourCamera(
     onBack: () -> Unit = {},
     onManual: () -> Unit = {},
     onAr: () -> Unit,
+    onArPoints: () -> Unit = onAr,
     onSwitchTool: (LiveMeasureTool) -> Unit = {},
     onSelectionSeed: (NormalizedPoint?) -> Unit = {}
 ) {
@@ -131,7 +135,12 @@ internal fun LiveContourCamera(
     var maximumZoom by remember { mutableStateOf(1f) }
     var tolerance by remember { mutableStateOf(32) }
     val previewView = remember(context) {
-        PreviewView(context).apply { scaleType=PreviewView.ScaleType.FILL_CENTER }
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            clipChildren = true
+            clipToPadding = true
+        }
     }
 
     val selection = remember { AtomicReference(ContourSelection(ready = false)) }
@@ -310,108 +319,13 @@ internal fun LiveContourCamera(
     val ink = Color(0xFF14251F)
     val lime = Color(0xFFC0F565)
     Column(Modifier.fillMaxSize().background(ink)) {
-        Column(
-            modifier = Modifier.fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(
-                    onClick = onBack,
-                    modifier = Modifier.background(ink.copy(alpha = 0.91f),
-                        RoundedCornerShape(60.dp))
-                ) { Text("‹", fontSize = 28.sp, color = Color.White) }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (tool == LiveMeasureTool.TANK) "Tanques" else "Régua e área",
-                        color = Color.White, fontWeight = FontWeight.Medium,
-                        fontSize = 17.sp
-                    )
-                    Text(
-                        if (tool == LiveMeasureTool.TANK) "CONTORNO AO VIVO"
-                        else "MEDIÇÃO PELA CÂMERA",
-                        color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp
-                    )
-                }
-                TextButton(
-                    onClick = { menuOpen = true },
-                    modifier = Modifier.background(ink.copy(alpha = 0.91f),
-                        RoundedCornerShape(60.dp))
-                ) { Text("•••", fontSize = 16.sp, color = Color.White) }
-            }
-            Row(
-                Modifier.fillMaxWidth().background(ink.copy(alpha = 0.96f),
-                    RoundedCornerShape(35.dp)).padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                val labels = if (tool == LiveMeasureTool.TANK)
-                    listOf("Câmera", "Manual")
-                else listOf("Régua", "Área")
-                labels.forEachIndexed { index, label ->
-                    val selectedTab = if (tool == LiveMeasureTool.TANK) index == 0
-                        else (tool == LiveMeasureTool.RULER && index == 0) ||
-                            (tool == LiveMeasureTool.AREA && index == 1)
-                    Box(
-                        Modifier.weight(1f)
-                            .background(if (selectedTab) lime else Color.Transparent,
-                                RoundedCornerShape(28.dp))
-                            .clickable {
-                                if (tool == LiveMeasureTool.TANK) {
-                                    if (index == 1) onManual()
-                                } else {
-                                    onSwitchTool(if (index == 0) LiveMeasureTool.RULER
-                                        else LiveMeasureTool.AREA)
-                                }
-                            }.padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(label, fontSize = 13.sp,
-                            color = if (selectedTab) ink else Color.White,
-                            fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { if (tool == LiveMeasureTool.TANK) onAr() else captureMeasurement() },
-                    enabled = tool == LiveMeasureTool.TANK || (capture != null && !capturing),
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = lime, contentColor = ink)
-                ) { Text(if (tool == LiveMeasureTool.TANK) "Medir tanque" else "Marcar pontos na foto") }
-                OutlinedButton(onClick = { if (tool == LiveMeasureTool.TANK) onManual() else onAr() },
-                    enabled = !capturing,
-                    modifier = Modifier.weight(1f)) {
-                    Text(if (tool == LiveMeasureTool.TANK) "Dimensões manuais" else "Medir no ambiente", color = lime)
-                }
-            }
-            if (tool != LiveMeasureTool.TANK) Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(Modifier.weight(1f)) {
-                    listOf(1f,2f,4f,8f).forEach { level ->
-                        TextButton(enabled = boundCamera != null && !capturing && level in minimumZoom..maximumZoom,
-                            modifier = Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
-                            onClick = {
-                                val future = boundCamera?.cameraControl?.setZoomRatio(level)
-                                future?.addListener({ runCatching { future.get() }.onFailure { latestError("Não foi possível aplicar este zoom.") } },mainExecutor)
-                            }) { Text(level.toInt().toString()+"×",color = if (kotlin.math.abs(zoomRatio-level)<.05f) lime else Color.White) }
-                    }
-                }
-                TextButton(enabled = capture != null && !capturing,onClick = { captureMeasurement() }) { Text("Medir de longe",color = lime) }
-            }
-        }
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize())
+        Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()
+            .semantics { contentDescription = "Visor livre da câmera" }) {
+            AndroidView(factory = { previewView },modifier = Modifier.fillMaxSize().clipToBounds())
             Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
                 detectTapGestures { touch ->
                     if (!showContours) {
-                        if (tool != LiveMeasureTool.TANK && size.width > 0 && size.height > 0) {
-                            runCatching { boundCamera?.cameraControl?.startFocusAndMetering(
-                                FocusMeteringAction.Builder(previewView.meteringPointFactory.createPoint(touch.x,touch.y)).build()) }
-                            captureMeasurement(NormalizedPoint((touch.x/size.width).coerceIn(0f,1f),(touch.y/size.height).coerceIn(0f,1f)))
-                        }
+                        if (!capturing) onAr()
                         return@detectTapGestures
                     }
                     val currentFrame = latestOverlay?.takeIf { it.width > 1 && it.height > 1 }
@@ -508,14 +422,48 @@ internal fun LiveContourCamera(
                 }
             }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Text(errorMessage ?: when {
-                capturing -> "Capturando a foto…"
-                capture == null -> "Preparando câmera. Você também pode abrir uma fotografia."
-                tool == LiveMeasureTool.TANK -> "Meça as dimensões em AR ou informe os valores conhecidos."
-                else -> "Toque no objeto para selecionar e medir. Para uma cerca distante, use o zoom e uma referência conhecida."
-            }, color = Color.White, fontSize = 13.sp)
-            if (tool != LiveMeasureTool.TANK) TextButton(onClick = onGallery) { Text("Abrir fotografia", color = lime) }
+        val message = errorMessage ?: when {
+            capturing -> "Capturando a foto…"
+            tool == LiveMeasureTool.TANK -> "Use Auto para medir no ambiente ou Manual para informar as dimensões."
+            else -> "Auto ou Pontos calcula no ambiente, sem digitar medidas. Foto usa uma referência conhecida."
+        }
+        MeasurementDock(if (tool == LiveMeasureTool.TANK) "Tanques" else "Régua e área", message) {
+            if (tool == LiveMeasureTool.TANK) {
+                MeasurementToolRow(listOf(
+                    MeasureAction("Voltar", icon = MeasureIcon.BACK, action = onBack),
+                    MeasureAction("Auto", "Medir tanque no ambiente", MeasureIcon.AUTO, selected = true, action = onAr),
+                    MeasureAction("Manual", "Dimensões manuais", MeasureIcon.RULER, action = onManual),
+                    MeasureAction("Mais", "Mais opções da câmera", MeasureIcon.MORE, action = { menuOpen = true })
+                ), columns = 4)
+            } else {
+                MeasurementToolRow(listOf(
+                    MeasureAction("Voltar", icon = MeasureIcon.BACK, action = onBack),
+                    MeasureAction("Régua", "Medir distância", MeasureIcon.RULER, selected = tool == LiveMeasureTool.RULER,
+                        action = { onSwitchTool(LiveMeasureTool.RULER) }),
+                    MeasureAction("Área", "Medir área", MeasureIcon.AREA, selected = tool == LiveMeasureTool.AREA,
+                        action = { onSwitchTool(LiveMeasureTool.AREA) }),
+                    MeasureAction("Auto", "Medir automaticamente no ambiente", MeasureIcon.AUTO, selected = true,
+                        enabled = !capturing, action = onAr),
+                    MeasureAction("Foto", "Marcar pontos na foto com referência", MeasureIcon.PHOTO,
+                        enabled = capture != null && !capturing, action = { captureMeasurement() }),
+                    MeasureAction("Mais", "Mais opções da câmera", MeasureIcon.MORE, action = { menuOpen = true })
+                ))
+                MeasurementToolRow(listOf(1f,2f,4f,8f).map { level ->
+                    MeasureAction(level.toInt().toString()+"×", "Zoom de "+level.toInt()+" vezes",
+                        selected = kotlin.math.abs(zoomRatio-level)<.05f,
+                        enabled = boundCamera != null && !capturing && level in minimumZoom..maximumZoom,
+                        action = {
+                            val future = boundCamera?.cameraControl?.setZoomRatio(level)
+                            future?.addListener({ runCatching { future.get() }.onFailure {
+                                latestError("Não foi possível aplicar este zoom.")
+                            } },mainExecutor)
+                        })
+                } + listOf(
+                    MeasureAction("Galeria", "Abrir fotografia", MeasureIcon.GALLERY, action = onGallery),
+                    MeasureAction("Pontos", "Marcar pontos no ambiente sem informar tamanho", MeasureIcon.POINT,
+                        enabled = !capturing, action = onArPoints)
+                ))
+            }
         }
         if (menuOpen) {
             ModalBottomSheet(onDismissRequest = { menuOpen = false }) {

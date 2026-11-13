@@ -1,12 +1,7 @@
 package br.com.medidor.app.ui
 
 import android.graphics.Bitmap
-import android.graphics.Paint
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -15,15 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import br.com.medidor.app.data.MeasurementPreferences
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
@@ -39,13 +26,16 @@ internal fun PointPhotoMeasurementScreen(
     initialArea: Boolean,
     onBack: () -> Unit,
     onSave: (String, String) -> Unit,
-    initialObjectSeed: NormalizedPoint? = null
+    initialObjectSeed: NormalizedPoint? = null,
+    onAutomatic: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val preferences = remember(context) { MeasurementPreferences(context.applicationContext) }
     var pointSize by remember { mutableStateOf(preferences.pointSize) }
     var pointOptions by remember { mutableStateOf(false) }
     var farHelp by remember { mutableStateOf(false) }
+    var referencePicking by remember(photo) { mutableStateOf(initialObjectSeed == null) }
+    var resetKey by remember(photo) { mutableStateOf(0) }
     var automaticArea by remember(photo) { mutableStateOf<Double?>(null) }
     var areaMode by remember(photo) { mutableStateOf(initialArea) }
     val reference = remember(photo) { mutableStateListOf<NormalizedPoint>() }
@@ -68,7 +58,8 @@ internal fun PointPhotoMeasurementScreen(
         "Área: " + if (it >= 1_000_000) "${number.format(it / 1_000_000)} m²" else "${number.format(it / 100)} cm²"
     }
     val instruction = when {
-        scaleMm == null && reference.size < 2 -> "1. Toque nos dois extremos de uma referência conhecida na foto."
+        scaleMm == null && !referencePicking -> "Objeto sem escala. Auto calcula no ambiente; Escala calibra esta foto."
+        scaleMm == null && reference.size < 2 -> "Foto: marque uma referência conhecida. Para calcular sem digitar tamanho, use Auto."
         scaleMm == null -> "2. Informe quanto mede a linha amarela para definir a escala."
         ratio == null -> "Afaste os pontos da referência para calcular a medida."
         points.isEmpty() -> "3. Toque no objeto para selecionar suas arestas ou use Pontos."
@@ -78,18 +69,42 @@ internal fun PointPhotoMeasurementScreen(
         else -> "Medida fixada. Arraste as pontas para ajustar ou salve."
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onBack) { Text("‹ Câmera") }
-            Row {
-                FilterChip(selected = !areaMode, onClick = { areaMode = false; points.clear(); saved = false }, label = { Text("Régua") })
-                FilterChip(selected = areaMode, onClick = { areaMode = true; points.clear(); saved = false }, label = { Text("Área") })
-            }
-        }
-        Text(result ?: if (areaMode) "Área por pontos" else "Régua por pontos",
-            modifier = Modifier.padding(horizontal = 12.dp), fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Text(notice ?: instruction, modifier = Modifier.padding(12.dp), fontSize = 14.sp)
         InteractiveMeasurementPhoto(
             photo,reference,points,scaleMm != null,areaMode,pointSize,
+            title = result ?: if (areaMode) "Foto · Área" else "Foto · Régua",
+            message = notice ?: instruction,
+            referencePicking = referencePicking,
+            resetKey = resetKey,
+            onReferenceModeChange = { referencePicking = it; notice = null },
+            automaticAvailable = onAutomatic != null,
+            leadingActions = listOf(
+                MeasureAction("Voltar", "Voltar à câmera", MeasureIcon.BACK, action = onBack),
+                MeasureAction("Régua", icon = MeasureIcon.RULER, selected = !areaMode,
+                    action = { areaMode = false; points.clear(); automaticArea = null; saved = false; notice = null }),
+                MeasureAction("Área", icon = MeasureIcon.AREA, selected = areaMode,
+                    action = { areaMode = true; points.clear(); automaticArea = null; saved = false; notice = null }),
+                MeasureAction("Auto", "Medir automaticamente no ambiente", MeasureIcon.AUTO,
+                    selected = scaleMm == null, enabled = onAutomatic != null, action = { onAutomatic?.invoke() }),
+                MeasureAction("Escala", "Definir escala da foto", MeasureIcon.SCALE,
+                    action = { if (reference.size == 2) scaleDialog = true else farHelp = true }),
+                MeasureAction(if (saved) "Salvo" else "Salvar", icon = MeasureIcon.SAVE,
+                    enabled = result != null && !saved, action = { result?.let {
+                        onSave(if (areaMode) "Área por pontos" else "Régua por pontos", "$it (estimativa por foto calibrada)")
+                        saved = true
+                    } })
+            ),
+            trailingActions = listOf(
+                MeasureAction("Desfaz.", "Desfazer", MeasureIcon.UNDO, enabled = reference.isNotEmpty(), action = {
+                    if (points.isNotEmpty()) points.removeAt(points.lastIndex)
+                    else { scaleMm = null; referencePicking = true; if (reference.isNotEmpty()) reference.removeAt(reference.lastIndex) }
+                    automaticArea = null; saved = false; notice = null
+                }),
+                MeasureAction("Refazer", icon = MeasureIcon.RESET, action = {
+                    scaleMm = null; reference.clear(); points.clear(); automaticArea = null
+                    resetKey++
+                    referencePicking = true; saved = false; notice = null
+                })
+            ),
             referenceCaption = scaleMm?.let { "REF ${length(it)}" },
             edgeCaption = { pixels -> ratio?.let { length(pixels*it) } },
             areaCaption = if (area != null) result else null,
@@ -99,25 +114,8 @@ internal fun PointPhotoMeasurementScreen(
             onAutomaticArea = { automaticArea = it },
             onNotice = { notice = it },
             onPointOptions = { pointOptions = true },
-            modifier = Modifier.fillMaxWidth().weight(1f)
+            modifier = Modifier.fillMaxSize()
         )
-        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (scaleMm == null) Button(onClick = { scaleDialog = true }, enabled = reference.size == 2, modifier = Modifier.fillMaxWidth()) { Text("Definir escala") }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = {
-                    if (points.isNotEmpty()) points.removeAt(points.lastIndex)
-                    else { scaleMm = null; if (reference.isNotEmpty()) reference.removeAt(reference.lastIndex) }
-                    automaticArea = null; saved = false; notice = null
-                }, modifier = Modifier.weight(1f), enabled = reference.isNotEmpty()) { Text("Desfazer") }
-                OutlinedButton(onClick = { scaleMm = null; reference.clear(); points.clear(); automaticArea = null; saved = false; notice = null }, modifier = Modifier.weight(1f)) { Text("Refazer") }
-                Button(onClick = { result?.let { onSave(if (areaMode) "Área por pontos" else "Régua por pontos", "$it (estimativa por foto calibrada)"); saved = true } },
-                    enabled = result != null && !saved, modifier = Modifier.weight(1f)) { Text(if (saved) "Salvo" else "Salvar") }
-            }
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("Referência e objeto no mesmo plano.", fontSize = 11.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = { farHelp = true }) { Text("Medir de longe") }
-            }
-        }
     }
     if (pointOptions) AlertDialog(
         onDismissRequest = { pointOptions = false },
@@ -136,9 +134,10 @@ internal fun PointPhotoMeasurementScreen(
         confirmButton = { TextButton(onClick = { pointOptions = false }) { Text("Fechar") } }
     )
     if (farHelp) AlertDialog(
-        onDismissRequest = { farHelp = false }, title = { Text("Medir uma cerca de longe") },
-        text = { Text("Fotografe a cerca de frente, incluindo uma referência conhecida, como a altura de um mourão no mesmo plano. Marque essa referência e informe o tamanho real. Depois toque na cerca para selecionar suas arestas. Use Ampliar seleção se precisar incluir mais partes, ou Pontos para escolher os extremos.\n\nUse o zoom e o ponto fino para ajustar detalhes. Esta medição é o comprimento ou a área projetada do objeto na foto; a distância entre você e a cerca exige uma leitura real de profundidade.") },
-        confirmButton = { TextButton(onClick = { farHelp = false }) { Text("Entendi") } }
+        onDismissRequest = { farHelp = false }, title = { Text("Escala da foto") },
+        text = { Text("Para medir sem informar tamanho, use Auto no ambiente. Uma fotografia isolada precisa de uma referência real para converter pixels em centímetros.\n\nFotografe a cerca de frente, incluindo uma referência conhecida, como a altura de um mourão no mesmo plano. Marque essa referência e informe o tamanho real. Depois toque na cerca para selecionar suas arestas. Use Ampliar seleção se precisar incluir mais partes, ou Pontos para escolher os extremos.\n\nUse o zoom e o ponto fino para ajustar detalhes. Esta medição é o comprimento ou a área projetada do objeto na foto; a distância entre você e a cerca exige uma leitura real de profundidade.") },
+        confirmButton = { TextButton(onClick = { farHelp = false; referencePicking = true; reference.clear(); scaleMm = null; notice = null }) { Text("Marcar referência") } },
+        dismissButton = { if (onAutomatic != null) TextButton(onClick = { farHelp = false; onAutomatic() }) { Text("Usar Auto") } }
     )
     if (scaleDialog) AlertDialog(
         onDismissRequest = { scaleDialog = false },

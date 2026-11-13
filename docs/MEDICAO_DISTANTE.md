@@ -1,10 +1,12 @@
 # Medição de cercas e detalhes distantes
 
+Os controles ficam no painel inferior, com ícones e nomes curtos. Na câmera, **Auto** encontra as arestas do objeto tocado e usa a superfície reconhecida; **Pontos** calcula a medida entre os extremos marcados. Esses modos não pedem o tamanho de uma referência, mas exigem suporte e rastreamento ARCore válidos. **Foto** é a opção calibrada descrita abaixo. Uma fotografia isolada não fornece escala física automaticamente.
+
 1. Enquadre a cerca de frente, inteira se possível, com uma referência conhecida no mesmo plano (por exemplo, a altura verificada de um mourão).
-2. Use o zoom disponível na câmera e toque no objeto ou em **Medir de longe**. A fotografia permanece fixa para conferir a seleção.
+2. Use o zoom disponível na câmera e toque em **Foto**. A fotografia permanece fixa para conferir a seleção.
 3. Marque os dois extremos da referência amarela e informe seu tamanho real. A escala depende dessa informação.
-4. Em **Objeto**, toque na cerca. A seleção recebe um brilho no contorno e o entorno escurece. A régua mede a maior aresta do contorno selecionado; a área mede sua projeção na fotografia. Tocar em outro objeto substitui a medição anterior.
-5. Se o scanner escolher apenas uma parte, tente **Ampliar seleção**. Se não houver um contorno completo, use **Pontos** e marque os extremos pretendidos. Não há agrupamento semântico de todos os fios e mourões.
+4. Em **Objeto**, toque na cerca. A seleção recebe um brilho no contorno e o entorno escurece. Os demais contornos ficam ocultos por padrão; **Arestas** permite conferi-los. Sem escala, o objeto informa a pendência e oferece **Auto**, evitando uma borda sem explicação. A régua mede a maior aresta do contorno selecionado; a área mede sua projeção na fotografia. Tocar em outro objeto substitui a medição anterior.
+5. Se o scanner escolher apenas uma parte, tente **Ampliar**. Se não houver um contorno completo, use **Pontos** e marque os extremos pretendidos. Não há agrupamento semântico de todos os fios e mourões.
 6. Amplie a foto até 8×, mova com dois dedos e escolha **Ponto → Fino** para detalhes pequenos. Arraste uma ponta para visualizar a lupa; tocar numa ponta também abre o tamanho do ponto. O zoom não muda a escala já calibrada.
 7. Confira as pontas e salve. Resultados são estimativas; objetos inclinados em relação à câmera e planos diferentes da referência distorcem a medida.
 

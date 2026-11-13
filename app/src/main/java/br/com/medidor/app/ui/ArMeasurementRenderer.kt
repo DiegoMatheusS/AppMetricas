@@ -98,7 +98,12 @@ internal class ArMeasurementRenderer(
     private val worldPoint = floatArrayOf(0f, 0f, 0f, 1f)
 
     /** Coordinates are normalized in the actual camera View, independent of the GL buffer size. */
-    fun requestPoint(x: Float, y: Float) { if (x in 0f..1f && y in 0f..1f) tap.set(PointF(x, y)) }
+    fun requestPoint(x: Float, y: Float) {
+        if (x in 0f..1f && y in 0f..1f) {
+            latest = latest.copy(canConfirm = false)
+            tap.set(PointF(x,y))
+        }
+    }
     fun requestMove(index: Int, x: Float, y: Float) {
         if (x in 0f..1f && y in 0f..1f) {
             latest = latest.copy(canConfirm = false)
@@ -248,7 +253,7 @@ internal class ArMeasurementRenderer(
                     lastAnalysis = 0L; lastAnalysisTimestamp = 0L
                     detectAutomatically(frame)
                 } else placePoint(frame, touch)
-            } else if (automatic && anchors.isEmpty()) {
+            } else if (automatic && anchors.isEmpty() && selectedView != null) {
                 detectAutomatically(frame)
             }
             updateOverlay(frame)
@@ -570,11 +575,12 @@ internal class ArMeasurementRenderer(
         val message = if (hasMeasurement && !canConfirm) "Conferindo estabilidade da medida (${anchorStability.count}/3)…"
             else notice ?: when {
             dimension != null && sides.isNotEmpty() -> "Confira os dois extremos e confirme a medida."
-            dimension != null && worldPoints.isEmpty() && automatic -> "Enquadre o tanque inteiro para detectar ${dimension.lowercase()}."
+            dimension != null && worldPoints.isEmpty() && automatic -> "Enquadre o tanque inteiro e toque nele para detectar ${dimension.lowercase()}."
             dimension != null && worldPoints.isEmpty() -> "Toque no primeiro extremo de ${dimension.lowercase()}."
             dimension != null -> "Mova-se devagar e toque no extremo oposto, no mesmo eixo."
             area != null -> "Área fechada. Você pode adicionar cantos em sequência ou salvar."
             areaMode && corners.size >= 3 -> "Confira a ordem dos cantos e desfaça os cruzamentos."
+            automatic && selectedView == null -> "Toque no objeto para calcular suas medidas. Não é preciso informar um tamanho."
             areaMode -> "Toque nos cantos em sequência, sobre uma única superfície plana."
             sides.isNotEmpty() -> "Confira a medida na linha ou desfaça o último ponto."
             worldPoints.isEmpty() -> "Mova o celular devagar e toque no início da medida."

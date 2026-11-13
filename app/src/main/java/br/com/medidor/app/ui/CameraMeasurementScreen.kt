@@ -99,7 +99,6 @@ fun CameraMeasurementScreen(
     var arOpen by rememberSaveable { mutableStateOf(false) }
     var chooseTankShape by remember { mutableStateOf(false) }
     var tankShapeForAr by remember { mutableStateOf<TankShape?>(null) }
-    var chooseEnvironment by remember { mutableStateOf(false) }
     var automaticEnvironment by remember { mutableStateOf(true) }
     val arLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -119,11 +118,13 @@ fun CameraMeasurementScreen(
             }
         }
     }
-    fun openAr() {
+    fun openAr(automatic: Boolean = true) {
         if (liveTool == LiveMeasureTool.TANK) {
             chooseTankShape = true
         } else {
-            chooseEnvironment = true
+            automaticEnvironment = automatic
+            arOpen = true
+            arLaunchRequested = true
         }
     }
     LaunchedEffect(arLaunchRequested) {
@@ -137,13 +138,6 @@ fun CameraMeasurementScreen(
             ))
         }
     }
-    if (chooseEnvironment) AlertDialog(
-        onDismissRequest = { chooseEnvironment = false },
-        title = { Text("Medir no ambiente") },
-        text = { Text("Os pontos ficam presos à superfície enquanto você move o celular. É necessário um aparelho compatível. Escolha encontrar o objeto ou marcar as pontas.") },
-        confirmButton = { TextButton(onClick = { automaticEnvironment = true; chooseEnvironment = false; arOpen = true; arLaunchRequested = true }) { Text("Encontrar objeto") } },
-        dismissButton = { TextButton(onClick = { automaticEnvironment = false; chooseEnvironment = false; arOpen = true; arLaunchRequested = true }) { Text("Marcar pontas") } }
-    )
     if (chooseTankShape) {
         AlertDialog(
             onDismissRequest = { chooseTankShape = false },
@@ -213,7 +207,7 @@ fun CameraMeasurementScreen(
     if (bitmap != null && pointEditor) {
         BackHandler { bitmap = null; pointEditor = false }
         PointPhotoMeasurementScreen(bitmap!!, liveTool == LiveMeasureTool.AREA,
-            onBack = { bitmap = null; pointEditor = false }, onSave = onSave, initialObjectSeed = objectSeed)
+            onBack = { bitmap = null; pointEditor = false }, onSave = onSave, initialObjectSeed = objectSeed, onAutomatic = { openAr() })
         return
     }
     // The live analysis owns the entire portrait viewport. Photo calibration remains available
@@ -236,7 +230,8 @@ fun CameraMeasurementScreen(
             tool = liveTool,
             onBack = onBack,
             onManual = onManual,
-            onAr = ::openAr,
+            onAr = { openAr() },
+            onArPoints = { openAr(false) },
             onSwitchTool = onSwitchTool
         )
         return
@@ -283,7 +278,8 @@ fun CameraMeasurementScreen(
                         tool = liveTool,
                         onBack = onBack,
                         onManual = onManual,
-                        onAr = ::openAr,
+                        onAr = { openAr() },
+                        onArPoints = { openAr(false) },
                         onSwitchTool = onSwitchTool
                     )
                 } else {
@@ -299,7 +295,7 @@ fun CameraMeasurementScreen(
                     )
                 }
             } else {
-                OutlinedButton(onClick = ::openAr) {
+                OutlinedButton(onClick = { openAr() }) {
                     Text(if (liveTool == LiveMeasureTool.TANK) "Medir tanque em AR" else "Medir em AR")
                 }
                 Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {
