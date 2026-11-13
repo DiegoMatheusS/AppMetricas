@@ -31,6 +31,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -153,7 +154,15 @@ internal fun InteractiveMeasurementPhoto(
     Column(modifier) {
         Canvas(Modifier.fillMaxWidth().weight(1f).clipToBounds().background(Color(0xFF202722))
             .onSizeChanged { viewSize = it }
-            .semantics { contentDescription = "Área de marcação da foto" }
+            .semantics {
+                contentDescription = "Área de marcação da foto"
+                stateDescription = when {
+                    referencePicking -> "Referência ativa · ${reference.size} pontos"
+                    objectMode -> "Seleção de objeto ativa"
+                    pointMode -> "Marcação ativa · ${points.size} pontos"
+                    else -> "Toque desativado · ${points.size} pontos"
+                }
+            }
             .pointerInput(photo,calibrated,areaMode,pointSize,referencePicking) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)

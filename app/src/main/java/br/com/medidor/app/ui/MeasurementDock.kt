@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -48,8 +49,11 @@ internal fun MeasurementDock(
         .semantics { contentDescription = "Controles inferiores de medição" },
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 21.sp)
-        if (!message.isNullOrBlank()) Text(message, color = Color.White.copy(alpha = .9f),
-            fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
+        val messageHeight = with(LocalDensity.current) { 54.sp.toDp() } + 6.dp
+        Box(Modifier.fillMaxWidth().heightIn(min = messageHeight)) {
+            if (!message.isNullOrBlank()) Text(message, color = Color.White.copy(alpha = .9f),
+                fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp))
+        }
         content()
     }
 }

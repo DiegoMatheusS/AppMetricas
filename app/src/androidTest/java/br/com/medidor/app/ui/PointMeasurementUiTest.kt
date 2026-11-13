@@ -187,7 +187,10 @@ class PointMeasurementUiTest {
             tapPhoto(.5f,.2f)
             waitFor("Quanto mede a linha amarela?")
             click("Aplicar escala") // Explicitly confirms the displayed 10 cm reference.
+            val viewportBeforeMode = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
             click("Marcar pontos na foto")
+            val viewportAfterMode = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
+            assertEquals("Trocar a instrução não desloca a fotografia",viewportBeforeMode,viewportAfterMode)
             tapPhoto(.1f,.8f); tapPhoto(.9f,.8f)
             waitFor("Distância: 20 cm")
             click("Salvar")
@@ -236,7 +239,18 @@ class PointMeasurementUiTest {
     private fun waitFor(text: String) {
         val deadline = SystemClock.elapsedRealtime()+10_000
         while (node(text)==null && SystemClock.elapsedRealtime()<deadline) Thread.sleep(100)
-        assertNotNull("Controle ou resultado esperado: $text",node(text))
+        val found = node(text)
+        if (found == null) {
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val pending = ArrayDeque<AccessibilityNodeInfo>().apply { root?.let(::add) }
+            val visible = mutableListOf<String>()
+            while (pending.isNotEmpty()) {
+                val next = pending.removeFirst()
+                next.text?.toString()?.let(visible::add)
+                repeat(next.childCount) { next.getChild(it)?.let(pending::addLast) }
+            }
+            fail("Controle ou resultado esperado: $text; foto=${node("Área de marcação da foto")?.stateDescription}; textos=${visible.distinct().joinToString(" | ")}")
+        }
     }
     private fun clickable(text: String): AccessibilityNodeInfo? {
         var current = node(text)
