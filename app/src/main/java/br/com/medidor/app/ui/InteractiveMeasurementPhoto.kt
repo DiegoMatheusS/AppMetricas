@@ -72,7 +72,8 @@ internal fun InteractiveMeasurementPhoto(
     var panX by remember(photo) { mutableStateOf(0f) }
     var panY by remember(photo) { mutableStateOf(0f) }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
-    var objectMode by remember(photo) { mutableStateOf(true) }
+    var objectMode by remember(photo) { mutableStateOf(false) }
+    var pointMode by remember(photo) { mutableStateOf(false) }
     var showEdges by remember(photo) { mutableStateOf(false) }
     var global by remember(photo) { mutableStateOf(emptyList<ObjectOutline>()) }
     var detail by remember(photo) { mutableStateOf(emptyList<ObjectOutline>()) }
@@ -126,7 +127,7 @@ internal fun InteractiveMeasurementPhoto(
         if (calibrated) pendingObject?.let(::applySelection)
     }
     LaunchedEffect(resetKey) {
-        selected = null; pendingObject = null; matches = emptyList(); onAutomaticArea(null)
+        selected = null; pendingObject = null; matches = emptyList(); objectMode = false; pointMode = false; onAutomaticArea(null)
     }
     LaunchedEffect(points.size, calibrated) {
         val outline = selected
@@ -204,9 +205,9 @@ internal fun InteractiveMeasurementPhoto(
                         previous = change.position
                         if (!change.pressed) {
                             loupe = null
-                            if (!moved && mapped != null) {
+                            if (!moved && mapped != null && (objectMode || pointMode || referencePicking)) {
                                 if (selectedPoint != null) {
-                                    onPointOptions()
+                                    // A tap on an existing point is inert; drag it to adjust.
                                 } else {
                                     val scene = (detail + global)
                                     val found = if (objectMode && (calibrated || !referencePicking))
@@ -307,15 +308,18 @@ internal fun InteractiveMeasurementPhoto(
             MeasurementToolRow(leadingActions)
             MeasurementToolRow(listOf(
                 MeasureAction("Objeto", "Selecionar objeto", MeasureIcon.OBJECT, selected = objectMode, action = {
-                    objectMode = true; onReferenceModeChange(false)
+                    objectMode = !objectMode; pointMode = false; onReferenceModeChange(false)
+                    onNotice(if (objectMode) "Objeto ativo: toque no objeto para selecioná-lo." else null)
                 }),
-                MeasureAction("Pontos", "Marcar pontos na foto", MeasureIcon.POINT, selected = !objectMode, action = {
+                MeasureAction("Pontos", "Marcar pontos na foto", MeasureIcon.POINT, selected = pointMode, action = {
                     if (objectMode) {
                         points.clear(); selected = null; pendingObject = null; matches = emptyList()
                         onAutomaticArea(null); onChanged(); onNotice(null)
                     }
-                    objectMode = false
-                    if (!calibrated) onReferenceModeChange(true)
+                    objectMode = false; pointMode = !pointMode
+                    if (!calibrated) onReferenceModeChange(pointMode)
+                    onNotice(if (!pointMode) null else if (!calibrated) "Referência ativa: marque as duas pontas de um tamanho conhecido."
+                        else if (areaMode) "Pontos ativo: marque os cantos da área." else "Pontos ativo: marque os dois extremos da medida.")
                 }),
                 MeasureAction("Ponto", "Tamanho do ponto", MeasureIcon.POINT, action = onPointOptions),
                 MeasureAction("Arestas", if (showEdges) "Ocultar arestas" else "Mostrar arestas", MeasureIcon.EDGES,

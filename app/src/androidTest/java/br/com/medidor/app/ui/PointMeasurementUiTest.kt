@@ -23,6 +23,30 @@ import kotlin.math.min
 class PointMeasurementUiTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
+    @Test fun cameraTapsAreInertUntilThePointButtonIsChosen() {
+        val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+        var automaticCalls = 0
+        var pointCalls = 0
+        var photoCalls = 0
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContent { MedidorTheme {
+                    LiveContourCamera(onPhoto = { photoCalls++ }, onError = {}, onAr = { automaticCalls++ },
+                        onArPoints = { pointCalls++ })
+                } }
+            }
+            tapPhoto(.5f,.5f,"Visor livre da câmera")
+            assertEquals(0,automaticCalls)
+            assertEquals(0,photoCalls)
+            assertEquals(0,pointCalls)
+            click("Marcar pontos no ambiente sem informar tamanho")
+            assertEquals(1,pointCalls)
+            assertEquals(0,automaticCalls)
+            assertNull(node("Quanto mede a linha amarela?"))
+        } finally { instrumentation.runOnMainSync { activity.finish() } }
+    }
+
     @Test fun largerTextKeepsInstructionsAndButtonsBelowThePhoto() {
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
@@ -37,7 +61,7 @@ class PointMeasurementUiTest {
                     }
                 }
             }
-            val instruction = "Foto: marque uma referência conhecida. Para calcular sem digitar tamanho, use Auto."
+            val instruction = "Foto: toque inativo. Ative Escala ou Objeto; Auto mede no ambiente sem referência."
             waitFor(instruction)
             val image = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
             val text = Rect().also { node(instruction)!!.getBoundsInScreen(it) }
@@ -100,8 +124,10 @@ class PointMeasurementUiTest {
             val deadline = SystemClock.elapsedRealtime()+10_000
             while (node("Escaneando arestas…") != null && SystemClock.elapsedRealtime()<deadline) Thread.sleep(100)
             assertNull("Escaneamento concluído",node("Escaneando arestas…"))
+            click("Definir escala da foto"); click("Marcar referência")
             tapPhoto(.1f,.15f); tapPhoto(.5f,.15f)
             click("Aplicar escala")
+            click("Selecionar objeto")
             tapPhoto(.2f,.6f)
             waitFor("Objeto selecionado")
             click("Salvar")
@@ -136,6 +162,10 @@ class PointMeasurementUiTest {
             }
             waitFor("Foto · Régua")
             assertFalse(clickable("Salvar")!!.isEnabled)
+            tapPhoto(.1f,.2f); tapPhoto(.5f,.2f)
+            assertNull("Toques não ativam marcação ou calibração sem um botão",node("Quanto mede a linha amarela?"))
+            assertFalse(clickable("Salvar")!!.isEnabled)
+            click("Definir escala da foto"); click("Marcar referência")
             val first = tapPhoto(.1f,.2f)
             SystemClock.sleep(100)
             val screen = instrumentation.uiAutomation.takeScreenshot()!!
@@ -152,15 +182,20 @@ class PointMeasurementUiTest {
             tapPhoto(.5f,.2f)
             waitFor("Quanto mede a linha amarela?")
             click("Aplicar escala") // Explicitly confirms the displayed 10 cm reference.
+            click("Marcar pontos na foto")
             tapPhoto(.1f,.8f); tapPhoto(.9f,.8f)
             waitFor("Distância: 20 cm")
             click("Salvar")
             instrumentation.waitForIdleSync()
             assertEquals(1,saved.size)
             assertTrue(saved[0].startsWith("Distância: 20 cm"))
+            click("Marcar pontos na foto") // Turn placement off; existing ends stay draggable.
+            tapPhoto(.5f,.4f)
+            waitFor("Distância: 20 cm")
             dragPhoto(.9f,.8f,.7f,.8f)
             waitFor("Distância: 15 cm")
             click("Área")
+            click("Marcar pontos na foto")
             tapPhoto(.1f,.5f); tapPhoto(.9f,.5f); tapPhoto(.9f,.9f); tapPhoto(.1f,.9f)
             waitFor("Área: 150 cm²")
             click("Salvar")

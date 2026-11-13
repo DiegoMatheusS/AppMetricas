@@ -325,7 +325,6 @@ internal fun LiveContourCamera(
             Canvas(Modifier.fillMaxSize().pointerInput(areaMode) {
                 detectTapGestures { touch ->
                     if (!showContours) {
-                        if (!capturing) onAr()
                         return@detectTapGestures
                     }
                     val currentFrame = latestOverlay?.takeIf { it.width > 1 && it.height > 1 }
@@ -425,7 +424,7 @@ internal fun LiveContourCamera(
         val message = errorMessage ?: when {
             capturing -> "Capturando a foto…"
             tool == LiveMeasureTool.TANK -> "Use Auto para medir no ambiente ou Manual para informar as dimensões."
-            else -> "Auto ou Pontos calcula no ambiente, sem digitar medidas. Foto usa uma referência conhecida."
+            else -> "Auto mede no ambiente. O toque fica inativo até ativar Pontos ou selecionar um objeto. Foto usa referência."
         }
         MeasurementDock(if (tool == LiveMeasureTool.TANK) "Tanques" else "Régua e área", message) {
             if (tool == LiveMeasureTool.TANK) {

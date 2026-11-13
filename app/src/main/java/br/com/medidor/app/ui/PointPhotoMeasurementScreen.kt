@@ -34,7 +34,7 @@ internal fun PointPhotoMeasurementScreen(
     var pointSize by remember { mutableStateOf(preferences.pointSize) }
     var pointOptions by remember { mutableStateOf(false) }
     var farHelp by remember { mutableStateOf(false) }
-    var referencePicking by remember(photo) { mutableStateOf(initialObjectSeed == null) }
+    var referencePicking by remember(photo) { mutableStateOf(false) }
     var resetKey by remember(photo) { mutableStateOf(0) }
     var automaticArea by remember(photo) { mutableStateOf<Double?>(null) }
     var areaMode by remember(photo) { mutableStateOf(initialArea) }
@@ -58,7 +58,7 @@ internal fun PointPhotoMeasurementScreen(
         "Área: " + if (it >= 1_000_000) "${number.format(it / 1_000_000)} m²" else "${number.format(it / 100)} cm²"
     }
     val instruction = when {
-        scaleMm == null && !referencePicking -> "Objeto sem escala. Auto calcula no ambiente; Escala calibra esta foto."
+        scaleMm == null && !referencePicking -> "Foto: toque inativo. Ative Escala ou Objeto; Auto mede no ambiente sem referência."
         scaleMm == null && reference.size < 2 -> "Foto: marque uma referência conhecida. Para calcular sem digitar tamanho, use Auto."
         scaleMm == null -> "2. Informe quanto mede a linha amarela para definir a escala."
         ratio == null -> "Afaste os pontos da referência para calcular a medida."
@@ -102,7 +102,7 @@ internal fun PointPhotoMeasurementScreen(
                 MeasureAction("Refazer", icon = MeasureIcon.RESET, action = {
                     scaleMm = null; reference.clear(); points.clear(); automaticArea = null
                     resetKey++
-                    referencePicking = true; saved = false; notice = null
+                    referencePicking = false; saved = false; notice = null
                 })
             ),
             referenceCaption = scaleMm?.let { "REF ${length(it)}" },
@@ -135,7 +135,7 @@ internal fun PointPhotoMeasurementScreen(
     )
     if (farHelp) AlertDialog(
         onDismissRequest = { farHelp = false }, title = { Text("Escala da foto") },
-        text = { Text("Para medir sem informar tamanho, use Auto no ambiente. Uma fotografia isolada precisa de uma referência real para converter pixels em centímetros.\n\nFotografe a cerca de frente, incluindo uma referência conhecida, como a altura de um mourão no mesmo plano. Marque essa referência e informe o tamanho real. Depois toque na cerca para selecionar suas arestas. Use Ampliar seleção se precisar incluir mais partes, ou Pontos para escolher os extremos.\n\nUse o zoom e o ponto fino para ajustar detalhes. Esta medição é o comprimento ou a área projetada do objeto na foto; a distância entre você e a cerca exige uma leitura real de profundidade.") },
+        text = { Text("Na foto, marque uma linha sobre uma referência de tamanho conhecido e informe seu valor. A referência precisa estar no mesmo plano do objeto.\n\nPara medir sem digitar um tamanho, use Auto no ambiente. O zoom e o ponto fino ajudam a ajustar as pontas.") },
         confirmButton = { TextButton(onClick = { farHelp = false; referencePicking = true; reference.clear(); scaleMm = null; notice = null }) { Text("Marcar referência") } },
         dismissButton = { if (onAutomatic != null) TextButton(onClick = { farHelp = false; onAutomatic() }) { Text("Usar Auto") } }
     )
@@ -156,7 +156,7 @@ internal fun PointPhotoMeasurementScreen(
         },
         confirmButton = { TextButton(onClick = {
             scaleMm = PhotoCalibration.manualReferenceMillimeters(known,unit)
-            points.clear(); saved = false; notice = null; scaleDialog = false
+            points.clear(); saved = false; notice = null; scaleDialog = false; referencePicking = false
         },enabled = span != null && ReferenceMarkQuality.isReadable(span) && PhotoCalibration.manualReferenceMillimeters(known,unit) != null) { Text("Aplicar escala") } },
         dismissButton = { TextButton(onClick = { scaleDialog = false }) { Text("Voltar à foto") } }
     )

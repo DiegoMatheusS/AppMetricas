@@ -120,6 +120,7 @@ fun AppShell() {
                 Destination.RULER, Destination.AREA, Destination.TANK_CAMERA,
                 Destination.PHOTO -> CameraMeasurementScreen(
                     onSave = ::addRecord,
+                    startInEnvironment = destination == Destination.RULER || destination == Destination.AREA,
                     liveTool = when (destination) {
                         Destination.AREA -> LiveMeasureTool.AREA
                         Destination.TANK_CAMERA -> LiveMeasureTool.TANK

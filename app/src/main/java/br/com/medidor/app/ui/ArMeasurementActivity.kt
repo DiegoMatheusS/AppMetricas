@@ -48,6 +48,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_AREA = "measure_area"
         private const val EXTRA_AUTOMATIC = "automatic_measurement"
+        const val EXTRA_NOTICE = "measurement_notice"
         const val EXTRA_SHAPE = "tank_shape"
         const val EXTRA_DIMENSIONS = "tank_dimensions"
 
@@ -65,9 +66,11 @@ internal class ArMeasurementActivity : ComponentActivity() {
     private lateinit var result: TextView
     private lateinit var confirm: Button
     private lateinit var undo: Button
-    private lateinit var clear: Button
     private lateinit var automatic: Button
     private lateinit var manual: Button
+    private lateinit var objectSelection: Button
+    private enum class InputMode { AUTOMATIC, OBJECT, POINTS }
+    private var inputMode = InputMode.AUTOMATIC
     private var session: Session? = null
     private var running = false
     private var askedForInstall = false
@@ -98,17 +101,18 @@ internal class ArMeasurementActivity : ComponentActivity() {
         pointPreferences = MeasurementPreferences(applicationContext)
         overlay = ArMeasurementOverlay(this, ::updateControls, onMove = { index,x,y ->
             if (running && !saved) cameraTouch(x,y)?.let { renderer.requestMove(index,it.first,it.second) }
-        }, onPointOptions = ::choosePointSize) { x, y ->
-            if (running && !saved) {
+        }) { x, y ->
+            if (running && !saved && inputMode != InputMode.AUTOMATIC) {
                 cameraTouch(x,y)?.let {
-                    renderer.requestPoint(it.first,it.second)
+                    renderer.requestPoint(it.first,it.second,selectObject = inputMode == InputMode.OBJECT)
                 }
             }
         }
         renderer = ArMeasurementRenderer(
             { display?.rotation ?: Surface.ROTATION_0 }, areaMode, dimensions, overlay::publish
         )
-        renderer.setAutomatic(intent.getBooleanExtra(EXTRA_AUTOMATIC,true))
+        inputMode = if (intent.getBooleanExtra(EXTRA_AUTOMATIC,true)) InputMode.AUTOMATIC else InputMode.POINTS
+        renderer.setAutomatic(inputMode != InputMode.POINTS)
         surface = GLSurfaceView(this).apply {
             setEGLContextClientVersion(2)
             setPreserveEGLContextOnPause(true)
@@ -172,17 +176,20 @@ internal class ArMeasurementActivity : ComponentActivity() {
                     })
                 }
             val modes = row()
-            automatic = action(modes,"Auto","Medir automaticamente",android.R.drawable.ic_menu_search) {
-                saved = false
-                surface.queueEvent { renderer.setAutomatic(true) }
+            automatic = action(modes,"Auto","Medir automaticamente sem tocar",android.R.drawable.ic_menu_search) {
+                setInputMode(InputMode.AUTOMATIC)
             }
-            manual = action(modes,"Pontos","Marcar pontos no ambiente",android.R.drawable.ic_menu_mylocation) {
-                saved = false
-                surface.queueEvent { renderer.setAutomatic(false) }
+            objectSelection = action(modes,"Objeto","Ativar seleção de objeto por toque",android.R.drawable.ic_menu_crop) {
+                setInputMode(InputMode.OBJECT)
             }
-            action(modes,"Ponto","Tamanho do ponto",android.R.drawable.ic_menu_edit,::choosePointSize)
-            action(modes,"Voltar","Voltar à câmera",android.R.drawable.ic_media_previous) { finish() }
+            manual = action(modes,"Pontos","Ativar marcação de pontos",android.R.drawable.ic_menu_mylocation) {
+                setInputMode(InputMode.POINTS)
+            }
+            action(modes,"Foto","Medir por foto com referência",android.R.drawable.ic_menu_camera) {
+                photoFallback("Modo Foto: capture uma imagem e defina uma referência conhecida.")
+            }
             val actions = row()
+            action(actions,"Voltar","Voltar à câmera",android.R.drawable.ic_media_previous) { finish() }
             confirm = action(actions,if (tankShape == null) "Salvar" else "Confirmar", "Salvar medição",android.R.drawable.ic_menu_save) {
                 confirm.isEnabled = false
                 surface.queueEvent { confirmMeasurement() }
@@ -192,17 +199,23 @@ internal class ArMeasurementActivity : ComponentActivity() {
                 saved = false
                 surface.queueEvent { renderer.undo() }
             }
-            clear = action(actions,"Refazer","Refazer medição",android.R.drawable.ic_menu_rotate) {
-                saved = false
-                surface.queueEvent {
-                    if (tankShape != null) renderer.restartTankMeasurement() else renderer.clear()
-                }
-            }
-            undo.isEnabled = false; clear.isEnabled = false
-            action(actions,"Ajuda","Ajuda da medição automática",android.R.drawable.ic_menu_help) {
-                AlertDialog.Builder(this@ArMeasurementActivity).setTitle("Medir sem informar tamanho")
-                    .setMessage("Mova o aparelho devagar até reconhecer a superfície. Em Auto, toque no objeto; em Pontos, marque os dois extremos. A medida aparece nas linhas e neste painel, sem pedir uma referência amarela. Confira a estabilidade antes de salvar.\n\nA leitura depende do suporte do aparelho. Se ele não reconhecer a superfície, volte e use Foto com uma referência conhecida no mesmo plano.")
-                    .setPositiveButton("Entendi",null).show()
+            undo.isEnabled = false
+            action(actions,"Mais","Mais opções de medição",android.R.drawable.ic_menu_manage) {
+                AlertDialog.Builder(this@ArMeasurementActivity).setTitle("Opções")
+                    .setItems(arrayOf("Tamanho do ponto","Refazer medição","Ajuda")) { _, index ->
+                        when (index) {
+                            0 -> choosePointSize()
+                            1 -> {
+                                saved = false
+                                surface.queueEvent {
+                                    if (tankShape != null) renderer.restartTankMeasurement() else renderer.clear()
+                                }
+                            }
+                            else -> AlertDialog.Builder(this@ArMeasurementActivity).setTitle("Medição automática")
+                                .setMessage("Enquadre o objeto e mova a câmera devagar até reconhecer a superfície. Auto calcula sem tocar; arraste as pontas para corrigir a medida. O toque só seleciona objetos ou marca pontos quando Objeto ou Pontos estiver ativo. A medida aparece nas linhas, sem pedir uma referência amarela.\n\nA leitura depende do suporte do aparelho. Foto usa uma referência conhecida no mesmo plano.")
+                                .setPositiveButton("Entendi",null).show()
+                        }
+                    }.show()
             }
         }
         root.addView(footer,LinearLayout.LayoutParams(MATCH_PARENT,WRAP_CONTENT))
@@ -266,7 +279,7 @@ internal class ArMeasurementActivity : ComponentActivity() {
             running = true
             surface.onResume()
         } catch (_: UnavailableException) {
-            status.text = "ARCore indisponível. Volte para usar a foto calibrada ou informar as dimensões."
+            photoFallback("Auto indisponível neste aparelho. Use Foto com uma referência conhecida.")
         } catch (_: Exception) {
             status.text = "Não foi possível abrir a câmera em AR. Feche outros apps que usam a câmera e tente novamente."
         }
@@ -281,7 +294,6 @@ internal class ArMeasurementActivity : ComponentActivity() {
             session?.pause()
             confirm.isEnabled = false
             undo.isEnabled = false
-            clear.isEnabled = false
         }
         super.onPause()
     }
@@ -339,20 +351,34 @@ internal class ArMeasurementActivity : ComponentActivity() {
         if (result.text != caption) result.text = caption
         val visibility = if (caption.isEmpty()) View.GONE else View.VISIBLE
         if (result.visibility != visibility) result.visibility = visibility
-        if (automatic.isEnabled == frame.automatic) {
-            automatic.isEnabled = !frame.automatic
-            manual.isEnabled = frame.automatic
-            val activeColor = Color.rgb(192, 245, 101)
-            val inactiveColor = Color.rgb(38, 57, 46)
-            val ink = Color.rgb(20, 37, 31)
-            automatic.backgroundTintList = ColorStateList.valueOf(if (frame.automatic) activeColor else inactiveColor)
-            manual.backgroundTintList = ColorStateList.valueOf(if (frame.automatic) inactiveColor else activeColor)
-            automatic.setTextColor(if (frame.automatic) ink else Color.WHITE)
-            manual.setTextColor(if (frame.automatic) Color.WHITE else ink)
+        fun select(button: Button, active: Boolean) {
+            if (button.isSelected == active && button.tag == true) return
+            button.tag = true
+            button.isSelected = active
+            val ink = Color.rgb(20,37,31)
+            button.backgroundTintList = ColorStateList.valueOf(if (active) Color.rgb(192,245,101) else Color.rgb(38,57,46))
+            button.setTextColor(if (active) ink else Color.WHITE)
+            button.compoundDrawables[1]?.setTint(if (active) ink else Color.rgb(192,245,101))
         }
+        select(automatic,inputMode == InputMode.AUTOMATIC)
+        select(objectSelection,inputMode == InputMode.OBJECT)
+        select(manual,inputMode == InputMode.POINTS)
         confirm.isEnabled = !saved && frame.canConfirm && measurement != null
         undo.isEnabled = frame.points.isNotEmpty() || (tankShape != null && frame.dimensionIndex > 0)
-        clear.isEnabled = frame.points.isNotEmpty() || (tankShape != null && frame.dimensionIndex > 0)
+    }
+
+    private fun setInputMode(mode: InputMode) {
+        inputMode = mode
+        saved = false
+        surface.queueEvent {
+            renderer.waitForSelection = mode == InputMode.OBJECT
+            renderer.setAutomatic(mode != InputMode.POINTS)
+        }
+    }
+
+    private fun photoFallback(message: String) {
+        setResult(RESULT_CANCELED,Intent().putExtra(EXTRA_NOTICE,message))
+        finish()
     }
 
     private fun label(size: Float) = TextView(this).apply {
@@ -407,7 +433,6 @@ private class ArMeasurementOverlay(
     context: Context,
     private val updateControls: (ArMeasurementFrame) -> Unit,
     private val onMove: (Int, Float, Float) -> Unit,
-    private val onPointOptions: () -> Unit,
     onPoint: (Float, Float) -> Unit
 ) : View(context) {
     var cameraView: View? = null
@@ -441,7 +466,7 @@ private class ArMeasurementOverlay(
         }
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             performClick()
-            if (dragged == null) onPoint(e.x, e.y) else onPointOptions()
+            if (dragged == null) onPoint(e.x, e.y)
             return true
         }
     })
