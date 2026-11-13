@@ -156,7 +156,7 @@ internal fun PointPhotoMeasurementScreen(
         },
         confirmButton = { TextButton(onClick = {
             scaleMm = PhotoCalibration.manualReferenceMillimeters(known,unit)
-            points.clear(); saved = false; notice = null; scaleDialog = false; referencePicking = false
+            saved = false; notice = null; scaleDialog = false; referencePicking = false
         },enabled = span != null && ReferenceMarkQuality.isReadable(span) && PhotoCalibration.manualReferenceMillimeters(known,unit) != null) { Text("Aplicar escala") } },
         dismissButton = { TextButton(onClick = { scaleDialog = false }) { Text("Voltar à foto") } }
     )

@@ -216,14 +216,15 @@ internal fun InteractiveMeasurementPhoto(
                                     if (found.isNotEmpty()) {
                                         matches = found; selectionIndex = 0; applySelection(found.first())
                                     } else {
-                                        val destination = if (!calibrated) reference else points
-                                        val limit = if (!calibrated || !areaMode) 2 else 12
+                                        val markingReference = !calibrated && referencePicking
+                                        val destination = if (markingReference) reference else points
+                                        val limit = if (markingReference || !areaMode) 2 else 12
                                         if (destination.size < limit && destination.none {
                                             PhotoCalibration.distancePixels(it,mapped,photo.width,photo.height) < 2
                                         }) {
-                                            if (calibrated) { selected = null; matches = emptyList(); onAutomaticArea(null) }
+                                            if (!markingReference) { selected = null; pendingObject = null; matches = emptyList(); onAutomaticArea(null) }
                                             destination.add(mapped); onChanged(); onNotice(null)
-                                            if (!calibrated && reference.size == 2) onReferenceComplete()
+                                            if (markingReference && reference.size == 2) onReferenceComplete()
                                         } else onNotice("Arraste uma ponta ou toque em outro objeto.")
                                     }
                                 }
@@ -282,6 +283,10 @@ internal fun InteractiveMeasurementPhoto(
                 val a = points[index]; val b = points[(index+1)%points.size]
                 edge(a,b,lime,edgeCaption(PhotoCalibration.distancePixels(a,b,photo.width,photo.height)))
             }
+            if (!calibrated && points.size >= 2) {
+                val center = Offset(points.map { position(it).x }.average().toFloat(),points.map { position(it).y }.average().toFloat())
+                label(if (automaticAvailable) "Sem escala · use Auto" else "Sem escala · use Escala",center)
+            }
             if (areaCaption != null && points.size >= 3)
                 label(areaCaption,Offset(points.map { position(it).x }.average().toFloat(),points.map { position(it).y }.average().toFloat()))
             reference.forEach { drawCircle(amber,(pointSize.radiusDp*2/3).dp.toPx(),position(it)) }
@@ -304,7 +309,13 @@ internal fun InteractiveMeasurementPhoto(
                 drawLine(Color.White,center-Offset(0f,12.dp.toPx()),center+Offset(0f,12.dp.toPx()),1.dp.toPx())
             }
         }
-        MeasurementDock(title, if (scanning) "Escaneando arestas…" else message) {
+        val activeMessage = when {
+            scanning -> "Escaneando arestas…"
+            !calibrated && referencePicking -> "Referência ativa: marque as duas pontas de um tamanho conhecido."
+            !calibrated && pointMode -> "Pontos ativo. Auto mede em centímetros; Escala calibra esta foto."
+            else -> message
+        }
+        MeasurementDock(title,activeMessage) {
             MeasurementToolRow(leadingActions)
             MeasurementToolRow(listOf(
                 MeasureAction("Objeto", "Selecionar objeto", MeasureIcon.OBJECT, selected = objectMode, action = {
@@ -317,8 +328,8 @@ internal fun InteractiveMeasurementPhoto(
                         onAutomaticArea(null); onChanged(); onNotice(null)
                     }
                     objectMode = false; pointMode = !pointMode
-                    if (!calibrated) onReferenceModeChange(pointMode)
-                    onNotice(if (!pointMode) null else if (!calibrated) "Referência ativa: marque as duas pontas de um tamanho conhecido."
+                    if (!calibrated) onReferenceModeChange(false)
+                    onNotice(if (!pointMode) null else if (!calibrated) "Pontos ativo. Auto mede em centímetros; Escala calibra esta foto."
                         else if (areaMode) "Pontos ativo: marque os cantos da área." else "Pontos ativo: marque os dois extremos da medida.")
                 }),
                 MeasureAction("Ponto", "Tamanho do ponto", MeasureIcon.POINT, action = onPointOptions),
