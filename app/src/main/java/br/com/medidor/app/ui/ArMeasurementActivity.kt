@@ -197,7 +197,13 @@ internal class ArMeasurementActivity : ComponentActivity() {
             confirm.isEnabled = false
             undo = action(actions,"Desfaz.","Desfazer",android.R.drawable.ic_menu_revert) {
                 saved = false
-                surface.queueEvent { renderer.undo() }
+                surface.queueEvent {
+                    if (inputMode == InputMode.POINTS) renderer.undo()
+                    else {
+                        if (tankShape != null) renderer.undo()
+                        renderer.setAutomatic(true)
+                    }
+                }
             }
             undo.isEnabled = false
             action(actions,"Mais","Mais opções de medição",android.R.drawable.ic_menu_manage) {
@@ -208,7 +214,8 @@ internal class ArMeasurementActivity : ComponentActivity() {
                             1 -> {
                                 saved = false
                                 surface.queueEvent {
-                                    if (tankShape != null) renderer.restartTankMeasurement() else renderer.clear()
+                                    if (tankShape != null) renderer.restartTankMeasurement()
+                                    renderer.setAutomatic(inputMode != InputMode.POINTS)
                                 }
                             }
                             else -> AlertDialog.Builder(this@ArMeasurementActivity).setTitle("Medição automática")
