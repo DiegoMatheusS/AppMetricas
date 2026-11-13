@@ -128,7 +128,9 @@ internal fun InteractiveMeasurementPhoto(
         if (calibrated) pendingObject?.let(::applySelection)
     }
     LaunchedEffect(resetKey) {
-        selected = null; pendingObject = null; matches = emptyList(); objectMode = false; pointMode = false; onAutomaticArea(null)
+        if (resetKey > 0) {
+            selected = null; pendingObject = null; matches = emptyList(); objectMode = false; pointMode = false; onAutomaticArea(null)
+        }
     }
     LaunchedEffect(points.size, calibrated) {
         val outline = selected

@@ -187,8 +187,10 @@ class PointMeasurementUiTest {
             tapPhoto(.5f,.2f)
             waitFor("Quanto mede a linha amarela?")
             click("Aplicar escala") // Explicitly confirms the displayed 10 cm reference.
+            waitFor("Área de marcação da foto")
             val viewportBeforeMode = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
             click("Marcar pontos na foto")
+            waitForPhotoState("Marcação ativa")
             val viewportAfterMode = Rect().also { node("Área de marcação da foto")!!.getBoundsInScreen(it) }
             assertEquals("Trocar a instrução não desloca a fotografia",viewportBeforeMode,viewportAfterMode)
             tapPhoto(.1f,.8f); tapPhoto(.9f,.8f)
@@ -256,6 +258,13 @@ class PointMeasurementUiTest {
         var current = node(text)
         repeat(8) { if (current?.isClickable == true) return current; current = current?.parent }
         return null
+    }
+    private fun waitForPhotoState(expected: String) {
+        val deadline = SystemClock.elapsedRealtime()+5_000
+        while (node("Área de marcação da foto")?.stateDescription?.toString()?.startsWith(expected) != true &&
+            SystemClock.elapsedRealtime() < deadline) Thread.sleep(50)
+        assertTrue("Modo esperado: $expected; atual: ${node("Área de marcação da foto")?.stateDescription}",
+            node("Área de marcação da foto")?.stateDescription?.toString()?.startsWith(expected) == true)
     }
     private fun click(text: String) {
         waitFor(text)
